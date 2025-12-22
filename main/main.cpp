@@ -32,9 +32,11 @@
 #include "lvgl_app_setting.hpp"     /* System settings and diagnostics */
 #include "lvgl_app_music.hpp"       /* Music player with file browser */
 #include "lvgl_app_rec.hpp"         /* Audio recorder to WAV */
+#include "lvgl_app_mibuddy.hpp"     /* MiBuddy virtual buddy (image slideshow) */
 #include "audio_driver.h"           /* Audio playback control */
 #include "wifi_manager.h"           /* WiFi auto-connect and status */
 #include "time_sync.h"              /* NTP time sync to RTC */
+#include "sd_logger.h"              /* SD card file logging */
 
 #include "esp_heap_caps.h"
 
@@ -191,6 +193,13 @@ extern "C" void app_main(void)
      */
     time_sync_init(NULL);
 
+    /* Initialize SD card file logger
+     * - Hooks into ESP-IDF logging to capture all ESP_LOG* output
+     * - Logs to /sdcard/logs/system.log with timestamps
+     * - Rotation and size limits configured in menuconfig
+     */
+    sd_logger_init();
+
     /*==========================================================================
      * PHASE 2: Content Discovery
      *=========================================================================*/
@@ -289,6 +298,15 @@ extern "C" void app_main(void)
     PhoneRecConf *app_rec_conf = new PhoneRecConf(0, 0);
     ESP_BROOKESIA_CHECK_NULL_EXIT(app_rec_conf, "Create app rec failed");
     ESP_BROOKESIA_CHECK_FALSE_EXIT((phone->installApp(app_rec_conf) >= 0), "Install app rec failed");
+
+    /* Install MiBuddy App
+     * - Virtual buddy that displays images from SD card
+     * - Loads PNG images from /sdcard/Images/ folder
+     * - Cycles through images every 2 seconds in a loop
+     */
+    PhoneMiBuddyConf *app_mibuddy_conf = new PhoneMiBuddyConf(0, 0);
+    ESP_BROOKESIA_CHECK_NULL_EXIT(app_mibuddy_conf, "Create app mibuddy failed");
+    ESP_BROOKESIA_CHECK_FALSE_EXIT((phone->installApp(app_mibuddy_conf) >= 0), "Install app mibuddy failed");
 
     /*==========================================================================
      * PHASE 5: Background Services

@@ -1,0 +1,28 @@
+menu "Net MQTT Configuration"
+
+    config NET_MQTT_BROKER_URI
+        string "Default MQTT broker URI"
+        default "mqtts://test.mosquitto.org:8883"
+        help
+            Default MQTT broker URI. Can be overridden at runtime.
+            Supports mqtt://, mqtts://, ws://, wss:// schemes.
+
+    config NET_MQTT_CLIENT_ID
+        string "Default client ID prefix"
+        default "esp32c6_"
+        help
+            Client ID prefix. MAC address will be appended.
+
+    config NET_MQTT_KEEPALIVE_SEC
+        int "Keep-alive interval (seconds)"
+        default 60
+        help
+            MQTT keep-alive interval in seconds.
+
+    config NET_MQTT_TASK_STACK_SIZE
+        int "MQTT task stack size"
+        default 4096
+        help
+            Stack size for the MQTT client task.
+
+endmenu

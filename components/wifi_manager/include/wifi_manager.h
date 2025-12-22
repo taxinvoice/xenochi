@@ -94,6 +94,26 @@ int wifi_manager_get_rssi(void);
 void wifi_manager_get_ip(char *ip_buf, size_t buf_len);
 
 /**
+ * @brief Get gateway IP address as string
+ *
+ * @param gw_buf Buffer to store the gateway IP string
+ * @param buf_len Size of the buffer (recommend at least 16 bytes)
+ *
+ * @note Returns "0.0.0.0" if not connected
+ */
+void wifi_manager_get_gateway(char *gw_buf, size_t buf_len);
+
+/**
+ * @brief Get DNS server IP address as string
+ *
+ * @param dns_buf Buffer to store the DNS IP string
+ * @param buf_len Size of the buffer (recommend at least 16 bytes)
+ *
+ * @note Returns "0.0.0.0" if not connected or no DNS configured
+ */
+void wifi_manager_get_dns(char *dns_buf, size_t buf_len);
+
+/**
  * @brief Get the SSID of the currently connected network
  *
  * @param ssid_buf Buffer to store the SSID string
@@ -110,6 +130,22 @@ void wifi_manager_get_ssid(char *ssid_buf, size_t buf_len);
  * or if the automatic retry is taking too long.
  */
 void wifi_manager_reconnect(void);
+
+/**
+ * @brief Disconnect from WiFi (disables auto-reconnect)
+ *
+ * Disconnects from the current network and disables automatic reconnection.
+ * Call wifi_manager_connect() to reconnect.
+ */
+void wifi_manager_disconnect(void);
+
+/**
+ * @brief Connect to WiFi (enables auto-reconnect)
+ *
+ * Initiates connection to the configured network and enables automatic
+ * reconnection on disconnect.
+ */
+void wifi_manager_connect(void);
 
 /**
  * @brief Scan for available WiFi networks

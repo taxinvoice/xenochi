@@ -1,0 +1,27 @@
+menu "Net API Configuration"
+
+    config NET_API_TIMEOUT_MS
+        int "Default request timeout (ms)"
+        default 10000
+        help
+            Default timeout in milliseconds for HTTP requests.
+
+    config NET_API_MAX_RESPONSE_SIZE
+        int "Maximum response buffer size"
+        default 8192
+        help
+            Maximum size in bytes for HTTP response body buffer.
+
+    config NET_API_TASK_STACK_SIZE
+        int "Async task stack size"
+        default 8192
+        help
+            Stack size for async HTTP request tasks.
+
+    config NET_API_MAX_HEADERS
+        int "Maximum custom headers"
+        default 8
+        help
+            Maximum number of custom headers that can be set.
+
+endmenu

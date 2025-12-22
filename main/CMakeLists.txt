@@ -17,6 +17,7 @@ idf_component_register(
     REQUIRES
         wifi_manager
         time_sync
+        sd_logger
         nvs_flash
         bsp_esp32_c6_touch_lcd_1_83
         esp-brookesia
@@ -24,5 +25,10 @@ idf_component_register(
         app_setting
         app_gyroscope
         app_rec_test
+        app_mibuddy
         audio_play
+        net_api
+        net_mqtt
+        net_tcp
+        net_file
 )

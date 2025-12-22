@@ -2229,6 +2229,33 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# Net API Configuration
+#
+CONFIG_NET_API_TIMEOUT_MS=10000
+CONFIG_NET_API_MAX_RESPONSE_SIZE=8192
+CONFIG_NET_API_TASK_STACK_SIZE=8192
+CONFIG_NET_API_MAX_HEADERS=8
+# end of Net API Configuration
+
+#
+# Net MQTT Configuration
+#
+CONFIG_NET_MQTT_BROKER_URI="mqtts://test.mosquitto.org:8883"
+CONFIG_NET_MQTT_CLIENT_ID="esp32c6_"
+CONFIG_NET_MQTT_KEEPALIVE_SEC=60
+CONFIG_NET_MQTT_TASK_STACK_SIZE=4096
+# end of Net MQTT Configuration
+
+#
+# SD Card Logger Configuration
+#
+# CONFIG_SD_LOGGER_DEFAULT_ENABLED is not set
+CONFIG_SD_LOGGER_MAX_FILE_SIZE_KB=1024
+CONFIG_SD_LOGGER_MAX_FILES=5
+CONFIG_SD_LOGGER_DIRECTORY="/sdcard/logs"
+# end of SD Card Logger Configuration
+
+#
 # MiBuddy Time Sync Configuration
 #
 CONFIG_MIBUDDY_NTP_SERVER="pool.ntp.org"

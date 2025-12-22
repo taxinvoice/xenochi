@@ -1,0 +1,33 @@
+menu "SD Card Logger Configuration"
+
+    config SD_LOGGER_DEFAULT_ENABLED
+        bool "Enable logging by default"
+        default n
+        help
+            If enabled, logging to SD card starts automatically on boot.
+            Can be toggled at runtime via sd_logger_set_enabled().
+
+    config SD_LOGGER_MAX_FILE_SIZE_KB
+        int "Max log file size (KB)"
+        default 1024
+        range 64 8192
+        help
+            Maximum size of each log file in kilobytes.
+            When reached, the log file is rotated.
+
+    config SD_LOGGER_MAX_FILES
+        int "Max number of log files to keep"
+        default 5
+        range 1 20
+        help
+            Number of rotated log files to keep.
+            Older files are deleted when this limit is exceeded.
+
+    config SD_LOGGER_DIRECTORY
+        string "Log directory path"
+        default "/sdcard/logs"
+        help
+            Directory on SD card where log files are stored.
+            Will be created if it doesn't exist.
+
+endmenu

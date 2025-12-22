@@ -289,7 +289,7 @@ void lv_demo_music_play(uint32_t id)
         Audio_Stop_Play();
     }
     memset(music_buf,0,sizeof(music_buf));
-    sprintf(music_buf,"file://sdcard/Sounds/%s",lvgl_music_get_title(id));
+    sprintf(music_buf,"file://sdcard/Music/%s",lvgl_music_get_title(id));
     printf("play:%s\r\n",music_buf);
     Audio_Play_Music(music_buf);
 }
@@ -318,7 +318,7 @@ void lv_demo_music_resume(void)
     if(status == ESP_ASP_STATE_NONE || status == ESP_ASP_STATE_STOPPED)
     {
         memset(music_buf,0,sizeof(music_buf));
-        sprintf(music_buf,"file://sdcard/Sounds/%s",lvgl_music_get_title(track_id));
+        sprintf(music_buf,"file://sdcard/Music/%s",lvgl_music_get_title(track_id));
         printf("play:%s\r\n",music_buf);
         Audio_Play_Music(music_buf);
     }

@@ -14,7 +14,7 @@ uint16_t file_count;
 
 void LVGL_Search_Music(void) 
 {        
-    file_count = Folder_retrieval("/sdcard/Sounds",".mp3",SD_Name,100);
+    file_count = Folder_retrieval("/sdcard/Music",".mp3",SD_Name,100);
     printf("file_count=%d\r\n",file_count);                                                        
 }
 

@@ -53,6 +53,7 @@ static wifi_status_callback_t s_status_callback = NULL;
 static volatile bool s_is_connected = false;
 static volatile int s_current_rssi = 0;
 static SemaphoreHandle_t s_scan_semaphore = NULL;
+static volatile bool s_auto_reconnect = true;  /* Enable auto-reconnect by default */
 
 /**
  * @brief Fetch current RSSI from connected AP
@@ -100,9 +101,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
-                /* Connection lost - auto retry */
+                /* Connection lost */
                 wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
-                ESP_LOGW(TAG, "Disconnected from AP (reason: %d), retrying...", event->reason);
+                ESP_LOGW(TAG, "Disconnected from AP (reason: %d)", event->reason);
 
                 s_is_connected = false;
                 s_current_rssi = 0;
@@ -112,9 +113,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     s_status_callback(false, 0);
                 }
 
-                /* Auto-retry after configured interval */
-                vTaskDelay(pdMS_TO_TICKS(CONFIG_MIBUDDY_WIFI_RETRY_INTERVAL_MS));
-                esp_wifi_connect();
+                /* Auto-retry only if enabled */
+                if (s_auto_reconnect) {
+                    ESP_LOGI(TAG, "Auto-reconnect enabled, retrying...");
+                    vTaskDelay(pdMS_TO_TICKS(CONFIG_MIBUDDY_WIFI_RETRY_INTERVAL_MS));
+                    esp_wifi_connect();
+                } else {
+                    ESP_LOGI(TAG, "Auto-reconnect disabled, staying disconnected");
+                }
                 break;
             }
 
@@ -248,6 +254,40 @@ void wifi_manager_get_ip(char *ip_buf, size_t buf_len)
     snprintf(ip_buf, buf_len, "0.0.0.0");
 }
 
+void wifi_manager_get_gateway(char *gw_buf, size_t buf_len)
+{
+    if (gw_buf == NULL || buf_len == 0) {
+        return;
+    }
+
+    if (s_is_connected && s_netif) {
+        esp_netif_ip_info_t ip_info;
+        if (esp_netif_get_ip_info(s_netif, &ip_info) == ESP_OK) {
+            snprintf(gw_buf, buf_len, IPSTR, IP2STR(&ip_info.gw));
+            return;
+        }
+    }
+
+    snprintf(gw_buf, buf_len, "0.0.0.0");
+}
+
+void wifi_manager_get_dns(char *dns_buf, size_t buf_len)
+{
+    if (dns_buf == NULL || buf_len == 0) {
+        return;
+    }
+
+    if (s_is_connected && s_netif) {
+        esp_netif_dns_info_t dns_info;
+        if (esp_netif_get_dns_info(s_netif, ESP_NETIF_DNS_MAIN, &dns_info) == ESP_OK) {
+            snprintf(dns_buf, buf_len, IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
+            return;
+        }
+    }
+
+    snprintf(dns_buf, buf_len, "0.0.0.0");
+}
+
 void wifi_manager_get_ssid(char *ssid_buf, size_t buf_len)
 {
     if (ssid_buf == NULL || buf_len == 0) {
@@ -269,7 +309,22 @@ void wifi_manager_get_ssid(char *ssid_buf, size_t buf_len)
 void wifi_manager_reconnect(void)
 {
     ESP_LOGI(TAG, "Manual reconnect requested");
+    s_auto_reconnect = true;
     esp_wifi_disconnect();
+    esp_wifi_connect();
+}
+
+void wifi_manager_disconnect(void)
+{
+    ESP_LOGI(TAG, "Manual disconnect requested");
+    s_auto_reconnect = false;
+    esp_wifi_disconnect();
+}
+
+void wifi_manager_connect(void)
+{
+    ESP_LOGI(TAG, "Manual connect requested");
+    s_auto_reconnect = true;
     esp_wifi_connect();
 }
 

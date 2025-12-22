@@ -35,6 +35,7 @@
 #include "wifi_scan.h"
 #include "wifi_manager.h"
 #include "time_sync.h"
+#include "sd_logger.h"
 
 using namespace std;
 using namespace esp_brookesia::gui;
@@ -69,6 +70,11 @@ static lv_obj_t *label_aldo1_voltage;       /**< ALDO1 voltage label */
 static lv_obj_t *label_bldo1_voltage;       /**< BLDO1 voltage label */
 static lv_obj_t *label_bldo2_voltage;       /**< BLDO2 voltage label */
 static lv_timer_t* axp_timer = NULL;        /**< Battery status update timer */
+
+/* File logging UI elements */
+static lv_obj_t *logging_switch = NULL;     /**< Logging enable/disable switch */
+static lv_obj_t *logging_size_label = NULL; /**< Log size display label */
+static lv_obj_t *but_clear_logs = NULL;     /**< Clear logs button */
 
 /* External PMU object from AXP2101 driver */
 extern XPowersPMU PMU;
@@ -382,6 +388,57 @@ static void wifi_btn_event_cb(lv_event_t *e)
 }
 
 /**
+ * @brief Logging switch toggle event callback
+ *
+ * Enables or disables file logging when switch is toggled.
+ *
+ * @param e LVGL event
+ */
+static void logging_switch_event_cb(lv_event_t *e)
+{
+    lv_obj_t *obj = (lv_obj_t*)lv_event_get_target(e);
+    bool enabled = lv_obj_has_state(obj, LV_STATE_CHECKED);
+    sd_logger_set_enabled(enabled);
+    printf("File logging %s\n", enabled ? "enabled" : "disabled");
+}
+
+/**
+ * @brief Clear logs button click event callback
+ *
+ * Clears all log files from SD card.
+ *
+ * @param e LVGL event
+ */
+static void clear_logs_btn_event_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        sd_logger_clear_all();
+        /* Update size display */
+        if (logging_size_label != NULL) {
+            lv_label_set_text(logging_size_label, "0 KB");
+        }
+        printf("Log files cleared\n");
+    }
+}
+
+/**
+ * @brief Update log size display label
+ */
+static void update_log_size_display(void)
+{
+    if (logging_size_label != NULL) {
+        uint32_t size_kb = sd_logger_get_total_size_kb();
+        char buf[32];
+        if (size_kb >= 1024) {
+            snprintf(buf, sizeof(buf), "%.1f MB", (float)size_kb / 1024.0f);
+        } else {
+            snprintf(buf, sizeof(buf), "%lu KB", size_kb);
+        }
+        lv_label_set_text(logging_size_label, buf);
+    }
+}
+
+/**
  * @brief Get flash memory size
  *
  * Queries the ESP32 flash chip for its physical size.
@@ -500,7 +557,7 @@ bool PhoneSettingConf::run(void)
     lv_obj_add_event_cb(but_bat_msg, bat_btn_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t * bat_msg_label = lv_label_create(but_bat_msg);
     lv_obj_align(bat_msg_label,LV_ALIGN_CENTER,0,0);
-    lv_label_set_text(bat_msg_label, "bat Message");
+    lv_label_set_text(bat_msg_label, "Battery Info");
     lv_obj_add_style(bat_msg_label, &style_text_muted, 0);
 
     lv_obj_t * wifi_label = lv_label_create(panel1);
@@ -511,7 +568,7 @@ bool PhoneSettingConf::run(void)
     lv_obj_add_event_cb(but_wifi_msg, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t * wifi_msg_label = lv_label_create(but_wifi_msg);
     lv_obj_align(wifi_msg_label,LV_ALIGN_CENTER,0,0);
-    lv_label_set_text(wifi_msg_label, "get wifi Message");
+    lv_label_set_text(wifi_msg_label, "wifi Info`");
     lv_obj_add_style(wifi_msg_label, &style_text_muted, 0);
 
 
@@ -527,9 +584,34 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_style_bg_color(Backlight_slider, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);             
     lv_obj_set_style_outline_width(Backlight_slider, 2, LV_PART_INDICATOR);  
     lv_obj_set_style_outline_color(Backlight_slider, lv_color_hex(0xD3D3D3), LV_PART_INDICATOR);      
-    lv_slider_set_range(Backlight_slider, 5, Backlight_MAX);              
-    lv_slider_set_value(Backlight_slider, DEFAULT_BACKLIGHT, LV_ANIM_ON);  
+    lv_slider_set_range(Backlight_slider, 5, Backlight_MAX);
+    lv_slider_set_value(Backlight_slider, DEFAULT_BACKLIGHT, LV_ANIM_ON);
     lv_obj_add_event_cb(Backlight_slider, Backlight_adjustment_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* File Logging section */
+    lv_obj_t * logging_label = lv_label_create(panel1);
+    lv_label_set_text(logging_label, "File Logging");
+    lv_obj_add_style(logging_label, &style_text_muted, 0);
+
+    /* Logging enable switch */
+    logging_switch = lv_switch_create(panel1);
+    lv_obj_set_size(logging_switch, 50, 25);
+    if (sd_logger_is_enabled()) {
+        lv_obj_add_state(logging_switch, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(logging_switch, logging_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Log size label */
+    logging_size_label = lv_label_create(panel1);
+    update_log_size_display();
+
+    /* Clear logs button */
+    but_clear_logs = lv_button_create(panel1);
+    lv_obj_set_size(but_clear_logs, 60, 25);
+    lv_obj_add_event_cb(but_clear_logs, clear_logs_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * clear_logs_label = lv_label_create(but_clear_logs);
+    lv_obj_align(clear_logs_label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(clear_logs_label, "Clear");
 
     static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t grid_main_row_dsc[] = {LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
@@ -551,7 +633,9 @@ bool PhoneSettingConf::run(void)
         40,               /*11: wifi button*/
         LV_GRID_CONTENT,  /*12: Backlight label*/
         40,               /*13: Backlight slider*/
-        LV_GRID_TEMPLATE_LAST               
+        LV_GRID_CONTENT,  /*14: Logging label*/
+        35,               /*15: Logging controls*/
+        LV_GRID_TEMPLATE_LAST
     };
 
     // 应用网格描述（确保只设置一次，覆盖之前的 grid_1 配置）
@@ -586,6 +670,11 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(Backlight_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 12, 1);
     lv_obj_set_grid_cell(Backlight_slider, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 13, 1);
 
+    // File Logging module (rows 14-15)
+    lv_obj_set_grid_cell(logging_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 14, 1);
+    lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 15, 1);
+    lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 15, 1);
+    lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 15, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 
@@ -621,6 +710,13 @@ static void example1_increase_lvgl_tick(lv_timer_t * t)
         } else {
             lv_obj_add_state(but_ntp_sync, LV_STATE_DISABLED);
         }
+    }
+
+    /* Update log size display (every 5 seconds to reduce SD card access) */
+    static int log_update_counter = 0;
+    if (++log_update_counter >= 5) {
+        log_update_counter = 0;
+        update_log_size_display();
     }
 }
 
