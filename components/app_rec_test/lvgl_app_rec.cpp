@@ -1,3 +1,23 @@
+/**
+ * @file lvgl_app_rec.cpp
+ * @brief Audio Recorder Application for ESP-Brookesia Phone UI
+ *
+ * This application provides audio recording functionality:
+ * - Record audio from I2S microphone
+ * - Save as WAV file to SD card
+ * - Automatic playback after recording completes
+ *
+ * Recording Parameters:
+ * - Format: PCM WAV
+ * - Sample rate: 16kHz
+ * - Bit depth: 32-bit
+ * - Channels: Stereo (2)
+ * - Duration: 5 seconds
+ * - Output: /sdcard/RECORD.WAV
+ *
+ * The recording runs in a separate FreeRTOS task to avoid blocking the UI.
+ */
+
 #include "lvgl_app_rec.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,39 +31,53 @@
 
 static const char *TAG = "app_rec";
 
+/*===========================================================================
+ * Recording Configuration
+ *===========================================================================*/
+
 #define EXAMPLE_I2S_TDM_FORMAT     (ES7210_I2S_FMT_I2S)
-#define EXAMPLE_I2S_CHAN_NUM       (2)
-#define EXAMPLE_I2S_SAMPLE_RATE    (16000)
+#define EXAMPLE_I2S_CHAN_NUM       (2)          /**< Stereo recording */
+#define EXAMPLE_I2S_SAMPLE_RATE    (16000)      /**< 16kHz sample rate */
 #define EXAMPLE_I2S_MCLK_MULTIPLE  (I2S_MCLK_MULTIPLE_256)
-#define EXAMPLE_I2S_SAMPLE_BITS    (I2S_DATA_BIT_WIDTH_32BIT)
-#define EXAMPLE_I2S_TDM_SLOT_MASK  (I2S_TDM_SLOT0 | I2S_TDM_SLOT1 |I2S_TDM_SLOT2 |I2S_TDM_SLOT3)
+#define EXAMPLE_I2S_SAMPLE_BITS    (I2S_DATA_BIT_WIDTH_32BIT)  /**< 32-bit samples */
+#define EXAMPLE_I2S_TDM_SLOT_MASK  (I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3)
 
-/* SD card & recording configurations */
-#define EXAMPLE_RECORD_TIME_SEC    (5)
-#define EXAMPLE_SD_MOUNT_POINT     "/sdcard"
-#define EXAMPLE_RECORD_FILE_PATH   "/RECORD.WAV"
+/* SD card and recording output configuration */
+#define EXAMPLE_RECORD_TIME_SEC    (5)              /**< Recording duration in seconds */
+#define EXAMPLE_SD_MOUNT_POINT     "/sdcard"        /**< SD card mount point */
+#define EXAMPLE_RECORD_FILE_PATH   "/RECORD.WAV"    /**< Output file path */
 
+/*===========================================================================
+ * WAV File Format Structures
+ *===========================================================================*/
+
+/**
+ * @brief WAV file header structure
+ *
+ * Standard PCM WAV header with RIFF descriptor, format chunk, and data chunk.
+ * Used to write proper WAV files that can be played by standard audio software.
+ */
 typedef struct {
     struct {
-        char chunk_id[4]; /*!< Contains the letters "RIFF" in ASCII form */
-        uint32_t chunk_size; /*!< This is the size of the rest of the chunk following this number */
-        char chunk_format[4]; /*!< Contains the letters "WAVE" */
-    } descriptor_chunk; /*!< Canonical WAVE format starts with the RIFF header */
+        char chunk_id[4];       /**< "RIFF" in ASCII */
+        uint32_t chunk_size;    /**< Size of file minus 8 bytes */
+        char chunk_format[4];   /**< "WAVE" in ASCII */
+    } descriptor_chunk;         /**< RIFF header */
     struct {
-        char subchunk_id[4]; /*!< Contains the letters "fmt " */
-        uint32_t subchunk_size; /*!< This is the size of the rest of the Subchunk which follows this number */
-        uint16_t audio_format; /*!< PCM = 1, values other than 1 indicate some form of compression */
-        uint16_t num_of_channels; /*!< Mono = 1, Stereo = 2, etc. */
-        uint32_t sample_rate; /*!< 8000, 44100, etc. */
-        uint32_t byte_rate; /*!< ==SampleRate * NumChannels * BitsPerSample s/ 8 */
-        uint16_t block_align; /*!< ==NumChannels * BitsPerSample / 8 */
-        uint16_t bits_per_sample; /*!< 8 bits = 8, 16 bits = 16, etc. */
-    } fmt_chunk; /*!< The "fmt " subchunk describes the sound data's format */
+        char subchunk_id[4];    /**< "fmt " in ASCII (note the space) */
+        uint32_t subchunk_size; /**< Size of fmt chunk (16 for PCM) */
+        uint16_t audio_format;  /**< Audio format (1 = PCM) */
+        uint16_t num_of_channels; /**< Number of channels (1=mono, 2=stereo) */
+        uint32_t sample_rate;   /**< Sample rate (e.g., 16000) */
+        uint32_t byte_rate;     /**< Bytes per second */
+        uint16_t block_align;   /**< Bytes per sample frame */
+        uint16_t bits_per_sample; /**< Bits per sample (8, 16, 32) */
+    } fmt_chunk;                /**< Format specification chunk */
     struct {
-        char subchunk_id[4]; /*!< Contains the letters "data" */
-        uint32_t subchunk_size; /*!< ==NumSamples * NumChannels * BitsPerSample / 8 */
-        int16_t data[0]; /*!< Holds raw audio data */
-    } data_chunk; /*!< The "data" subchunk contains the size of the data and the actual sound */
+        char subchunk_id[4];    /**< "data" in ASCII */
+        uint32_t subchunk_size; /**< Size of audio data */
+        int16_t data[0];        /**< Audio samples (flexible array) */
+    } data_chunk;               /**< Audio data chunk */
 } wav_header_t;
 
 /**
@@ -77,37 +111,64 @@ typedef struct {
 using namespace std;
 using namespace esp_brookesia::gui;
 
-static lv_timer_t * auto_step_timer = NULL;
-static // 全局标签数组（8个数据项）
-lv_obj_t *labels[8];  // 0:AccelX, 1:AccelY, 2:AccelZ, 3:Temp, // 4:GyroX, 5:GyroY, 6:GyroZ, 7:Time
-static bsp_handles_t *handles;
+/*===========================================================================
+ * Module State Variables
+ *===========================================================================*/
+
+static lv_timer_t * auto_step_timer = NULL; /**< Unused timer (reserved) */
+static lv_obj_t *labels[8];                 /**< Unused label array (reserved) */
+static bsp_handles_t *handles;              /**< BSP handles for I2S access */
 static void example1_increase_lvgl_tick(lv_timer_t * t);
-static lv_obj_t * btn1;
-static TaskHandle_t task_handle = NULL;  // 任务句柄
-static  lv_obj_t * msg_content_label = NULL;
-static lv_obj_t * rec_msg;
+static lv_obj_t * btn1;                     /**< Start recording button */
+static TaskHandle_t task_handle = NULL;     /**< Recording task handle */
+static lv_obj_t * msg_content_label = NULL; /**< Recording progress label */
+static lv_obj_t * rec_msg;                  /**< Recording message box */
 
+/*===========================================================================
+ * Constructors/Destructor
+ *===========================================================================*/
 
+/**
+ * @brief Construct recorder app with status/navigation bar options
+ */
 PhoneRecConf::PhoneRecConf(bool use_status_bar, bool use_navigation_bar):
     ESP_Brookesia_PhoneApp("rec", &icon_rec, true, use_status_bar, use_navigation_bar)
 {
 }
 
+/**
+ * @brief Construct recorder app with default settings
+ */
 PhoneRecConf::PhoneRecConf():
     ESP_Brookesia_PhoneApp("rec", &icon_rec, true)
 {
 }
 
+/**
+ * @brief Destructor
+ */
 PhoneRecConf::~PhoneRecConf()
 {
     ESP_BROOKESIA_LOGD("Destroy(@0x%p)", this);
-
 }
 
 
 
 
 
+/*===========================================================================
+ * Recording Functions
+ *===========================================================================*/
+
+/**
+ * @brief Record audio to WAV file on SD card
+ *
+ * Records audio from I2S microphone for EXAMPLE_RECORD_TIME_SEC seconds
+ * and saves as WAV file. Shows progress in UI and plays back after completion.
+ *
+ * @param i2s_rx_chan I2S receive channel handle
+ * @return ESP_OK on success
+ */
 static esp_err_t record_wav(i2s_chan_handle_t i2s_rx_chan)
 {
     esp_err_t ret = ESP_OK;
@@ -165,15 +226,25 @@ static esp_err_t record_wav(i2s_chan_handle_t i2s_rx_chan)
 }
 
 
+/**
+ * @brief Recording task function (FreeRTOS task)
+ *
+ * Runs in background to avoid blocking UI during recording.
+ *
+ * @param arg Unused task argument
+ */
 static void rec_test_task(void *arg)
 {
     record_wav(handles->i2s_rx_handle);
     task_handle = NULL;
     vTaskDelete(NULL);
-    
 }
 
-
+/**
+ * @brief Create and show recording progress message box
+ *
+ * Creates a popup showing recording progress and starts the recording task.
+ */
 static void lv_create_wifi_msgbox(void)
 {
     rec_msg = lv_msgbox_create(NULL);
@@ -198,16 +269,28 @@ static void lv_create_wifi_msgbox(void)
     xTaskCreate(rec_test_task, "rec_test_task", 1024 * 6, NULL, 4, &task_handle);
 }
 
+/**
+ * @brief Start recording button event handler
+ *
+ * Opens the recording popup when the button is clicked.
+ *
+ * @param e LVGL event
+ */
 static void event_handler(lv_event_t * e)
 {
     lv_event_code_t code = lv_event_get_code(e);
 
-    if(code == LV_EVENT_CLICKED) {
+    if (code == LV_EVENT_CLICKED) {
         lv_create_wifi_msgbox();
     }
-
 }
 
+/**
+ * @brief Create the recording UI
+ *
+ * Creates a styled "Start Recording" button centered on screen.
+ * Uses custom blue gradient style with press animation.
+ */
 void lv_example_rec(void)
 {
     /*Init the style for the default state*/
@@ -268,43 +351,74 @@ void lv_example_rec(void)
     lv_obj_center(label);
 }
 
+/*===========================================================================
+ * App Lifecycle Methods
+ *===========================================================================*/
+
+/**
+ * @brief Called when the recorder app is launched
+ *
+ * Initializes audio playback system (for playback after recording)
+ * and creates the recording button UI.
+ *
+ * @return true on success
+ */
 bool PhoneRecConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
-    
+
+    /* Initialize audio for playback after recording */
     Audio_Play_Init();
+
+    /* Get BSP handles for I2S access */
     handles = bsp_display_get_handles();
+
+    /* Create recording button UI */
     lv_example_rec();
-    
+
     return true;
 }
 
+/**
+ * @brief Handle back button press
+ *
+ * Closes the app and returns to home screen.
+ *
+ * @return true on success
+ */
 bool PhoneRecConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
 
-    // If the app needs to exit, call notifyCoreClosed() to notify the core to close the app
+    /* Notify core to close the app */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
-
-
 
     return true;
 }
 
-
-
+/**
+ * @brief Called when the app is closed
+ *
+ * Cleans up event handlers, stops any running recording task,
+ * and deinitializes audio resources.
+ *
+ * @return true on success
+ */
 bool PhoneRecConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
-    lv_obj_remove_event_cb(btn1,event_handler);
+
+    /* Remove button event callback */
+    lv_obj_remove_event_cb(btn1, event_handler);
     btn1 = NULL;
 
+    /* Stop recording task if still running */
     if (task_handle != NULL) {
-        vTaskDelete(task_handle);  // 删除任务
-        task_handle = NULL;        // 句柄置空，避免野指针
+        vTaskDelete(task_handle);
+        task_handle = NULL;
     }
 
-    /* Do some operations here if needed */
+    /* Notify core and cleanup audio */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
     Audio_Play_Deinit();
     return true;

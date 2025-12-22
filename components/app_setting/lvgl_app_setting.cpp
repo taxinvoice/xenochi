@@ -1,3 +1,26 @@
+/**
+ * @file lvgl_app_setting.cpp
+ * @brief Settings Application for ESP-Brookesia Phone UI
+ *
+ * This application provides system settings and diagnostics:
+ * - SD card storage information
+ * - Flash memory size
+ * - Real-time clock display (PCF85063A)
+ * - Battery/power status (AXP2101 PMU)
+ * - WiFi network scanning
+ * - Backlight brightness control
+ *
+ * UI Layout:
+ * - Main panel with grid layout for settings items
+ * - Popup message boxes for detailed battery and WiFi info
+ * - Slider for backlight adjustment
+ *
+ * Lifecycle:
+ * - run(): Creates settings UI with all controls
+ * - back(): Closes app and returns to home
+ * - close(): Cleanup (stops timers)
+ */
+
 #include "lvgl_app_setting.hpp"
 #include "lvgl.h"
 #include "esp_brookesia.hpp"
@@ -6,7 +29,7 @@
 #include "app_setting_assets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_flash.h" 
+#include "esp_flash.h"
 #include "bsp_board.h"
 #include "XPowersLib.h"
 #include "wifi_scan.h"
@@ -14,148 +37,227 @@
 using namespace std;
 using namespace esp_brookesia::gui;
 
+/*===========================================================================
+ * UI Element References
+ *===========================================================================*/
 
-static lv_style_t style_text_muted;
-static lv_obj_t * SD_Size;
-static lv_obj_t * FlashSize;
-static lv_obj_t * RTC_Time;
-static lv_obj_t * but_bat_msg;
-static lv_obj_t * but_wifi_msg;
-static lv_obj_t * Backlight_slider;
-static lv_timer_t * auto_step_timer = NULL;
+static lv_style_t style_text_muted;         /**< Muted text style */
 
-static lv_obj_t *list_bat_msg;
-static lv_obj_t *label_charging;
-static lv_obj_t *label_battery_connect;
-static lv_obj_t *label_vbus_in;
-static lv_obj_t *label_battery_percent;
-static lv_obj_t *label_battery_voltage;
-static lv_obj_t *label_vbus_voltage;
-static lv_obj_t *label_system_voltage;
-static lv_obj_t *label_dc1_voltage;
-static lv_obj_t *label_aldo1_voltage;
-static lv_obj_t *label_bldo1_voltage;
-static lv_obj_t *label_bldo2_voltage;
-static lv_timer_t* axp_timer = NULL;
+/* Main panel elements */
+static lv_obj_t * SD_Size;                  /**< SD card size text area */
+static lv_obj_t * FlashSize;                /**< Flash size text area */
+static lv_obj_t * RTC_Time;                 /**< RTC time display */
+static lv_obj_t * but_bat_msg;              /**< Battery info button */
+static lv_obj_t * but_wifi_msg;             /**< WiFi scan button */
+static lv_obj_t * Backlight_slider;         /**< Backlight brightness slider */
+static lv_timer_t * auto_step_timer = NULL; /**< RTC update timer */
+
+/* Battery message box elements */
+static lv_obj_t *list_bat_msg;              /**< Battery info list */
+static lv_obj_t *label_charging;            /**< Charging status label */
+static lv_obj_t *label_battery_connect;     /**< Battery connected label */
+static lv_obj_t *label_vbus_in;             /**< VBUS input label */
+static lv_obj_t *label_battery_percent;     /**< Battery percentage label */
+static lv_obj_t *label_battery_voltage;     /**< Battery voltage label */
+static lv_obj_t *label_vbus_voltage;        /**< VBUS voltage label */
+static lv_obj_t *label_system_voltage;      /**< System voltage label */
+static lv_obj_t *label_dc1_voltage;         /**< DC1 rail voltage label */
+static lv_obj_t *label_aldo1_voltage;       /**< ALDO1 voltage label */
+static lv_obj_t *label_bldo1_voltage;       /**< BLDO1 voltage label */
+static lv_obj_t *label_bldo2_voltage;       /**< BLDO2 voltage label */
+static lv_timer_t* axp_timer = NULL;        /**< Battery status update timer */
+
+/* External PMU object from AXP2101 driver */
 extern XPowersPMU PMU;
+
+/* Forward declaration */
 static void example1_increase_lvgl_tick(lv_timer_t * t);
 
 
+/*===========================================================================
+ * Constructors/Destructor
+ *===========================================================================*/
+
+/**
+ * @brief Construct settings app with status/navigation bar options
+ */
 PhoneSettingConf::PhoneSettingConf(bool use_status_bar, bool use_navigation_bar):
     ESP_Brookesia_PhoneApp("Setting", &icon_setting, true, use_status_bar, use_navigation_bar)
 {
 }
 
+/**
+ * @brief Construct settings app with default settings
+ */
 PhoneSettingConf::PhoneSettingConf():
     ESP_Brookesia_PhoneApp("Setting", &icon_setting, true)
 {
 }
 
+/**
+ * @brief Destructor
+ */
 PhoneSettingConf::~PhoneSettingConf()
 {
     ESP_BROOKESIA_LOGD("Destroy(@0x%p)", this);
-
 }
 
+/*===========================================================================
+ * Event Callbacks
+ *===========================================================================*/
 
-
-static void Backlight_adjustment_event_cb(lv_event_t * e) 
+/**
+ * @brief Backlight slider change callback
+ *
+ * Called when user adjusts the backlight slider.
+ * Updates both the slider display and the actual LCD backlight.
+ *
+ * @param e LVGL event
+ */
+static void Backlight_adjustment_event_cb(lv_event_t * e)
 {
-  uint8_t Backlight = lv_slider_get_value((lv_obj_t*)lv_event_get_target(e));  
-  if (Backlight <= Backlight_MAX)  
-  {
-    lv_slider_set_value(Backlight_slider, Backlight, LV_ANIM_ON); 
-    bsp_set_backlight(Backlight);
-  }
-  else
-    printf("Backlight out of range: %d\n", Backlight);
+    uint8_t Backlight = lv_slider_get_value((lv_obj_t*)lv_event_get_target(e));
+    if (Backlight <= Backlight_MAX) {
+        lv_slider_set_value(Backlight_slider, Backlight, LV_ANIM_ON);
+        bsp_set_backlight(Backlight);
+    }
+    else {
+        printf("Backlight out of range: %d\n", Backlight);
+    }
 }
 
-
+/**
+ * @brief Battery status update timer callback
+ *
+ * Called every 1 second to refresh battery information from AXP2101 PMU.
+ * Updates all voltage and status labels in the battery message box.
+ *
+ * @param timer LVGL timer handle
+ */
 static void axp2101_time_cb(lv_timer_t *timer)
 {
+    /* Update status flags */
     lv_label_set_text(label_charging, PMU.isCharging() ? "YES" : "NO");
-    lv_label_set_text(label_battery_connect, PMU.isBatteryConnect() ?  "YES" : "NO");
-    lv_label_set_text(label_vbus_in, PMU.isVbusIn() ?  "YES" : "NO");
+    lv_label_set_text(label_battery_connect, PMU.isBatteryConnect() ? "YES" : "NO");
+    lv_label_set_text(label_vbus_in, PMU.isVbusIn() ? "YES" : "NO");
+
+    /* Update battery info */
     lv_label_set_text_fmt(label_battery_percent, "%d %%", PMU.getBatteryPercent());
     lv_label_set_text_fmt(label_battery_voltage, "%d mV", PMU.getBattVoltage());
     lv_label_set_text_fmt(label_vbus_voltage, "%d mV", PMU.getVbusVoltage());
+
+    /* Update power rail voltages */
     lv_label_set_text_fmt(label_system_voltage, "%d mV", PMU.getSystemVoltage());
     lv_label_set_text_fmt(label_dc1_voltage, "%d mV", PMU.getDC1Voltage());
     lv_label_set_text_fmt(label_aldo1_voltage, "%d mV", PMU.getALDO1Voltage());
     lv_label_set_text_fmt(label_bldo1_voltage, "%d mV", PMU.getBLDO1Voltage());
     lv_label_set_text_fmt(label_bldo2_voltage, "%d mV", PMU.getBLDO2Voltage());
-    
 }
 
-void axp2101_tile_init(lv_obj_t *parent) 
+/**
+ * @brief Initialize battery information tile/list
+ *
+ * Creates a scrollable list showing all AXP2101 PMU readings:
+ * - Charging status, battery connection, VBUS input
+ * - Battery percentage and voltage
+ * - Various power rail voltages (VBUS, System, DC1, ALDO1, BLDO1/2)
+ *
+ * Also starts a 1-second timer to update readings.
+ *
+ * @param parent Parent LVGL object to add the list to
+ */
+void axp2101_tile_init(lv_obj_t *parent)
 {
-    /*Create a list*/
+    /* Create scrollable list for battery info */
     list_bat_msg = lv_list_create(parent);
     lv_obj_set_size(list_bat_msg, lv_pct(95), lv_pct(90));
 
     lv_obj_t *list_item;
 
+    /* Charging status */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "isCharging");
     label_charging = lv_label_create(list_item);
     lv_label_set_text(label_charging, PMU.isCharging() ? "YES" : "NO");
 
+    /* Battery connection status */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "isBatteryConnect");
     label_battery_connect = lv_label_create(list_item);
-    lv_label_set_text(label_battery_connect, PMU.isBatteryConnect() ?  "YES" : "NO");
+    lv_label_set_text(label_battery_connect, PMU.isBatteryConnect() ? "YES" : "NO");
 
+    /* USB VBUS input status */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "isVbusIn");
     label_vbus_in = lv_label_create(list_item);
-    lv_label_set_text(label_vbus_in, PMU.isVbusIn() ?  "YES" : "NO");
+    lv_label_set_text(label_vbus_in, PMU.isVbusIn() ? "YES" : "NO");
 
+    /* Battery percentage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "BatteryPercent");
     label_battery_percent = lv_label_create(list_item);
     lv_label_set_text_fmt(label_battery_percent, "%d %%", PMU.getBatteryPercent());
 
+    /* Battery voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "BatteryVoltage");
     label_battery_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_battery_voltage, "%d mV", PMU.getBattVoltage());
-    
+
+    /* VBUS voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "VbusVoltage");
     label_vbus_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_vbus_voltage, "%d mV", PMU.getVbusVoltage());
 
+    /* System voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "SystemVoltage");
     label_system_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_system_voltage, "%d mV", PMU.getSystemVoltage());
 
+    /* DC1 power rail voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "DC1Voltage");
     label_dc1_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_dc1_voltage, "%d mV", PMU.getDC1Voltage());
 
+    /* ALDO1 power rail voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "ALDO1Voltage");
     label_aldo1_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_aldo1_voltage, "%d mV", PMU.getALDO1Voltage());
 
+    /* BLDO1 power rail voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "BLDO1Voltage");
     label_bldo1_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_bldo1_voltage, "%d mV", PMU.getBLDO1Voltage());
 
+    /* BLDO2 power rail voltage */
     list_item = lv_list_add_btn(list_bat_msg, NULL, "BLDO2Voltage");
     label_bldo2_voltage = lv_label_create(list_item);
     lv_label_set_text_fmt(label_bldo2_voltage, "%d mV", PMU.getBLDO2Voltage());
 
-
-    axp_timer =  lv_timer_create(axp2101_time_cb, 1000, NULL);
+    /* Start timer to update values every second */
+    axp_timer = lv_timer_create(axp2101_time_cb, 1000, NULL);
 }
 
+/**
+ * @brief Battery message box close event callback
+ *
+ * Called when battery info message box is closed.
+ * Stops the update timer to prevent accessing deleted objects.
+ *
+ * @param e LVGL event
+ */
 static void msg_box_button_exit_event_cb(lv_event_t * e)
 {
     lv_obj_t * mbox = (lv_obj_t *) lv_event_get_user_data(e);
 
-    // 1. 停止定时器（取消注释并完善）
-    if(axp_timer != NULL) {
-        lv_timer_del(axp_timer);  // 关闭定时器
-        axp_timer = NULL;        // 避免野指针
+    /* Stop the update timer when closing */
+    if (axp_timer != NULL) {
+        lv_timer_del(axp_timer);
+        axp_timer = NULL;
     }
-
 }
 
+/**
+ * @brief Create and show battery information message box
+ *
+ * Creates a popup showing detailed AXP2101 PMU information
+ * with live updating values.
+ */
 static void lv_create_msgbox(void)
 {
     lv_obj_t * setting = lv_msgbox_create(NULL);
@@ -163,42 +265,59 @@ static void lv_create_msgbox(void)
 
     lv_msgbox_add_title(setting, "AXP2101");
 
-    /* setting fixed size */
+    /* Set fixed size for the message box */
     lv_obj_set_size(setting, 200, 250);
 
-    /* setting's titlebar/header */
+    /* Add close button and register cleanup callback */
     lv_obj_t * exit_but = lv_msgbox_add_close_button(setting);
     lv_obj_add_event_cb(setting, msg_box_button_exit_event_cb, LV_EVENT_DELETE, NULL);
 
-    /* setting's content*/
+    /* Configure content area with vertical flex layout */
     lv_obj_t * content = lv_msgbox_get_content(setting);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_right(content, -1, LV_PART_SCROLLBAR);
 
+    /* Initialize battery info list inside content */
     axp2101_tile_init(content);
-
 }
 
-// 电池按钮事件回调
+/**
+ * @brief Battery button click event callback
+ *
+ * Opens the battery information popup when clicked.
+ *
+ * @param e LVGL event
+ */
 static void bat_btn_event_cb(lv_event_t *e)
 {
     lv_obj_t * obj = (lv_obj_t*)lv_event_get_target(e);
-    if(lv_obj_has_state(obj, LV_EVENT_CLICKED)) 
-    {
+    if (lv_obj_has_state(obj, LV_EVENT_CLICKED)) {
         lv_create_msgbox();
     }
 }
 
-
+/**
+ * @brief WiFi message box close event callback
+ *
+ * Called when WiFi scan message box is closed.
+ * Stops the WiFi scan task.
+ *
+ * @param e LVGL event
+ */
 static void wifi_msg_box_exit_event_cb(lv_event_t * e)
 {
     lv_obj_t * mbox = (lv_obj_t *) lv_event_get_user_data(e);
 
+    /* Stop WiFi scanning when closing */
     delete_lv_wifi_scan_task();
-
 }
 
+/**
+ * @brief Create and show WiFi scan message box
+ *
+ * Creates a full-screen popup showing available WiFi networks.
+ */
 static void lv_create_wifi_msgbox(void)
 {
     lv_obj_t * setting = lv_msgbox_create(NULL);
@@ -206,54 +325,85 @@ static void lv_create_wifi_msgbox(void)
 
     lv_msgbox_add_title(setting, "wifi");
 
-    /* setting fixed size */
+    /* Full-screen size for WiFi list */
     lv_obj_set_size(setting, 240, 284);
 
-    /* setting's titlebar/header */
+    /* Add close button and register cleanup callback */
     lv_obj_t * exit_but = lv_msgbox_add_close_button(setting);
     lv_obj_add_event_cb(setting, wifi_msg_box_exit_event_cb, LV_EVENT_DELETE, NULL);
 
-    /* setting's content*/
+    /* Configure content area */
     lv_obj_t * content = lv_msgbox_get_content(setting);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_right(content, -1, LV_PART_SCROLLBAR);
 
+    /* Initialize WiFi scan UI */
     wifi_tile_init(content);
-
 }
 
-// wifi按钮事件回调
+/**
+ * @brief WiFi button click event callback
+ *
+ * Opens the WiFi scan popup when clicked.
+ *
+ * @param e LVGL event
+ */
 static void wifi_btn_event_cb(lv_event_t *e)
 {
     lv_obj_t * obj = (lv_obj_t*)lv_event_get_target(e);
-    if(lv_obj_has_state(obj, LV_EVENT_CLICKED)) 
-    {
+    if (lv_obj_has_state(obj, LV_EVENT_CLICKED)) {
         lv_create_wifi_msgbox();
     }
 }
 
+/**
+ * @brief Get flash memory size
+ *
+ * Queries the ESP32 flash chip for its physical size.
+ *
+ * @return Flash size in MB, or 0 on error
+ */
 uint32_t Flash_Searching(void)
 {
     uint32_t Flash_Size;
-    if(esp_flash_get_physical_size(NULL, &Flash_Size) == ESP_OK)
-    {
+    if (esp_flash_get_physical_size(NULL, &Flash_Size) == ESP_OK) {
         Flash_Size = Flash_Size / (uint32_t)(1024 * 1024);
         printf("Flash size: %ld MB\n", Flash_Size);
         return Flash_Size;
     }
-    else{
+    else {
         printf("Get flash size failed\n");
         return 0;
     }
-    return 0;
 }
 
 extern uint32_t SDCard_Size;
+
+/*===========================================================================
+ * App Lifecycle Methods
+ *===========================================================================*/
+
+/**
+ * @brief Called when the settings app is launched
+ *
+ * Creates the main settings UI with:
+ * - SD card size display
+ * - Flash size display
+ * - RTC time display (updated every second)
+ * - Battery info button (opens popup)
+ * - WiFi scan button (opens popup)
+ * - Backlight brightness slider
+ *
+ * Uses LVGL grid layout for alignment.
+ *
+ * @return true on success
+ */
 bool PhoneSettingConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
 
+    /* Initialize muted text style (90% opacity) */
     lv_style_init(&style_text_muted);
     lv_style_set_text_opa(&style_text_muted, LV_OPA_90);
 

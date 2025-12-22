@@ -14,4 +14,14 @@ set(INCLUDE_DIRS
 idf_component_register(
     SRCS ${SOURCES}
     INCLUDE_DIRS ${INCLUDE_DIRS}
+    REQUIRES
+        wifi_manager
+        nvs_flash
+        bsp_esp32_c6_touch_lcd_1_83
+        esp-brookesia
+        app_music
+        app_setting
+        app_gyroscope
+        app_rec_test
+        audio_play
 )

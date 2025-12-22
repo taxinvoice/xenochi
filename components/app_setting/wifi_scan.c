@@ -1,9 +1,21 @@
+/**
+ * @file wifi_scan.c
+ * @brief WiFi scanning UI for Settings app
+ *
+ * Provides a UI tile for scanning and displaying available WiFi networks.
+ * Uses wifi_manager for all WiFi operations.
+ *
+ * Note: WiFi is initialized at boot by wifi_manager in main.cpp.
+ * This module only handles scanning and display, not connection management.
+ */
+
 #include "wifi_scan.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_lvgl_port.h"
+#include "wifi_manager.h"
 
 
 
@@ -55,7 +67,7 @@ static void sw_wifi_event_handler(lv_event_t *e)
         if (lv_obj_has_state(obj, LV_STATE_CHECKED))
         {
             g_wifi_enable = true;
-            esp_wifi_port_connect();
+            wifi_manager_reconnect();
         }
         else
         {
@@ -65,11 +77,19 @@ static void sw_wifi_event_handler(lv_event_t *e)
                 lv_obj_del(list_btns[i]);
             }
             list_item_count = 0;
-            esp_wifi_port_disconnect();
+            /* Note: We don't disconnect WiFi here anymore.
+             * The wifi_manager handles the connection lifecycle.
+             */
         }
     }
 }
 
+/**
+ * @brief Background task for WiFi scanning and IP display
+ *
+ * Waits for scan requests via semaphore, performs scan using wifi_manager,
+ * and updates the UI with results. Also periodically updates the IP display.
+ */
 static void lvgl_wifi_task(void *arg)
 {
     char str[50] = {0};
@@ -77,21 +97,21 @@ static void lvgl_wifi_task(void *arg)
     lv_obj_t *label;
     wifi_ap_record_t ap_info[LIST_BTN_LEN_MAX];
     uint16_t scan_number = 0;
-    esp_wifi_port_init("WSTEST", "waveshare0755");
+
+    /* Note: WiFi is already initialized by wifi_manager at boot */
+
     while (1)
     {
         if (xSemaphoreTake(wifi_scanf_semaphore, pdMS_TO_TICKS(1000)) == pdTRUE)
         {
             printf("wifi_scanf!!\r\n");
             memset(ap_info, 0, sizeof(ap_info));
-            if (esp_wifi_port_scan(ap_info, &scan_number, LIST_BTN_LEN_MAX))
+
+            /* Use wifi_manager for scanning */
+            if (wifi_manager_scan(ap_info, &scan_number, LIST_BTN_LEN_MAX, 5000))
             {
                 if (lvgl_port_lock(0))
                 {
-                    for (int i = 0; i < list_item_count; i++)
-                    {
-                        //lv_obj_del(list_btns[i]);
-                    }
                     for (int i = 0; i < scan_number && i < LIST_BTN_LEN_MAX; i++)
                     {
                         list_btns[i] = lv_list_add_btn(list, NULL, (char *)ap_info[i].ssid);
@@ -104,7 +124,8 @@ static void lvgl_wifi_task(void *arg)
             }
         }
 
-        esp_wifi_port_get_ip(str_wifi_ip);
+        /* Update IP display using wifi_manager */
+        wifi_manager_get_ip(str_wifi_ip, sizeof(str_wifi_ip));
         sprintf(str, "IP: %s", str_wifi_ip);
 
         if (lvgl_port_lock(0))
@@ -150,16 +171,24 @@ void wifi_tile_init(lv_obj_t *parent)
 }
 
 
+/**
+ * @brief Clean up WiFi scan task and UI resources
+ *
+ * Called when Settings app WiFi tile is closed.
+ * Note: WiFi connection is NOT terminated - it stays connected.
+ */
 void delete_lv_wifi_scan_task(void)
 {
-
-    lv_obj_remove_event_cb(btn,btn_wifi_scan_event_handler);
+    lv_obj_remove_event_cb(btn, btn_wifi_scan_event_handler);
     btn = NULL;
 
     if (lvgl_wifi_task_handle != NULL) {
-        vTaskDelete(lvgl_wifi_task_handle);  // 删除任务
-        lvgl_wifi_task_handle = NULL;        // 句柄置空，避免野指针
+        vTaskDelete(lvgl_wifi_task_handle);
+        lvgl_wifi_task_handle = NULL;
     }
 
-    esp_wifi_port_deinit();
+    /* Note: Do NOT call wifi_manager_deinit() here.
+     * WiFi should stay connected even when Settings app is closed.
+     * wifi_manager manages the WiFi lifecycle globally.
+     */
 }

@@ -1,0 +1,24 @@
+menu "MiBuddy WiFi Configuration"
+
+    config MIBUDDY_WIFI_SSID
+        string "WiFi SSID"
+        default "MyNetwork"
+        help
+            The SSID of the WiFi network to connect to on boot.
+            Set this to your WiFi network name.
+
+    config MIBUDDY_WIFI_PASSWORD
+        string "WiFi Password"
+        default "password"
+        help
+            The password for the WiFi network.
+            Set this to your WiFi network password.
+
+    config MIBUDDY_WIFI_RETRY_INTERVAL_MS
+        int "Retry interval (ms)"
+        default 5000
+        help
+            Interval in milliseconds between WiFi reconnection attempts.
+            The device will retry forever until connected.
+
+endmenu

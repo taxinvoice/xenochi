@@ -2229,6 +2229,14 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# MiBuddy WiFi Configuration
+#
+CONFIG_MIBUDDY_WIFI_SSID="notsafe"
+CONFIG_MIBUDDY_WIFI_PASSWORD="0419335999-NICE1"
+CONFIG_MIBUDDY_WIFI_RETRY_INTERVAL_MS=5000
+# end of MiBuddy WiFi Configuration
+
+#
 # ESP Brookesia Configurations
 #
 CONFIG_ESP_BROOKESIA_CONF_FILE_SKIP=y
