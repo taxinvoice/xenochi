@@ -34,6 +34,7 @@
 #include "lvgl_app_rec.hpp"         /* Audio recorder to WAV */
 #include "audio_driver.h"           /* Audio playback control */
 #include "wifi_manager.h"           /* WiFi auto-connect and status */
+#include "time_sync.h"              /* NTP time sync to RTC */
 
 #include "esp_heap_caps.h"
 
@@ -182,6 +183,13 @@ extern "C" void app_main(void)
      * Note: WiFi starts connecting in the background while UI loads
      */
     wifi_manager_init(on_wifi_status_changed);
+
+    /* Initialize time sync module
+     * - Syncs time from NTP server when WiFi connects
+     * - Updates hardware RTC (PCF85063A) with synchronized time
+     * - Timezone configured in menuconfig (MiBuddy Time Sync Configuration)
+     */
+    time_sync_init(NULL);
 
     /*==========================================================================
      * PHASE 2: Content Discovery

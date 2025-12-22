@@ -60,7 +60,7 @@ constexpr ESP_Brookesia_StatusBarData_t ESP_BROOKESIA_PHONE_240_284_DARK_STATUS_
                 .icon = {
                     .image_num = 4,
                     .images = {
-                        ESP_BROOKESIA_STYLE_IMAGE_RECOLOR_WHITE(&esp_brookesia_image_large_status_bar_wifi_close_36_36),
+                        ESP_BROOKESIA_STYLE_IMAGE_RECOLOR(&esp_brookesia_image_large_status_bar_wifi_close_36_36, 0xFF4444),  /* Red for disconnected */
                         ESP_BROOKESIA_STYLE_IMAGE_RECOLOR_WHITE(&esp_brookesia_image_large_status_bar_wifi_level1_36_36),
                         ESP_BROOKESIA_STYLE_IMAGE_RECOLOR_WHITE(&esp_brookesia_image_large_status_bar_wifi_level2_36_36),
                         ESP_BROOKESIA_STYLE_IMAGE_RECOLOR_WHITE(&esp_brookesia_image_large_status_bar_wifi_level3_36_36),

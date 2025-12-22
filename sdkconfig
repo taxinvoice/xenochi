@@ -2229,6 +2229,14 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# MiBuddy Time Sync Configuration
+#
+CONFIG_MIBUDDY_NTP_SERVER="pool.ntp.org"
+CONFIG_MIBUDDY_TIMEZONE="UTC0"
+CONFIG_MIBUDDY_SYNC_ON_CONNECT=y
+# end of MiBuddy Time Sync Configuration
+
+#
 # MiBuddy WiFi Configuration
 #
 CONFIG_MIBUDDY_WIFI_SSID="notsafe"

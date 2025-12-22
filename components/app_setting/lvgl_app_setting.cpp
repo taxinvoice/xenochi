@@ -33,6 +33,8 @@
 #include "bsp_board.h"
 #include "XPowersLib.h"
 #include "wifi_scan.h"
+#include "wifi_manager.h"
+#include "time_sync.h"
 
 using namespace std;
 using namespace esp_brookesia::gui;
@@ -47,6 +49,7 @@ static lv_style_t style_text_muted;         /**< Muted text style */
 static lv_obj_t * SD_Size;                  /**< SD card size text area */
 static lv_obj_t * FlashSize;                /**< Flash size text area */
 static lv_obj_t * RTC_Time;                 /**< RTC time display */
+static lv_obj_t * but_ntp_sync;             /**< NTP sync button */
 static lv_obj_t * but_bat_msg;              /**< Battery info button */
 static lv_obj_t * but_wifi_msg;             /**< WiFi scan button */
 static lv_obj_t * Backlight_slider;         /**< Backlight brightness slider */
@@ -123,6 +126,27 @@ static void Backlight_adjustment_event_cb(lv_event_t * e)
     }
     else {
         printf("Backlight out of range: %d\n", Backlight);
+    }
+}
+
+/**
+ * @brief NTP sync button click event callback
+ *
+ * Triggers manual NTP time synchronization when clicked.
+ * Only works when WiFi is connected.
+ *
+ * @param e LVGL event
+ */
+static void ntp_sync_btn_event_cb(lv_event_t *e)
+{
+    lv_obj_t * obj = (lv_obj_t*)lv_event_get_target(e);
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        if (wifi_manager_is_connected()) {
+            printf("Manual NTP sync triggered\n");
+            time_sync_now();
+        } else {
+            printf("Cannot sync: WiFi not connected\n");
+        }
     }
 }
 
@@ -456,6 +480,17 @@ bool PhoneSettingConf::run(void)
     lv_textarea_set_one_line(RTC_Time, true);
     lv_textarea_set_placeholder_text(RTC_Time, "Display time");
 
+    /* NTP Sync button - enabled only when WiFi is connected */
+    but_ntp_sync = lv_button_create(panel1);
+    lv_obj_set_size(but_ntp_sync, 60, 35);
+    lv_obj_add_event_cb(but_ntp_sync, ntp_sync_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * ntp_sync_label = lv_label_create(but_ntp_sync);
+    lv_obj_align(ntp_sync_label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(ntp_sync_label, "Sync");
+    /* Set initial state based on WiFi connection */
+    if (!wifi_manager_is_connected()) {
+        lv_obj_add_state(but_ntp_sync, LV_STATE_DISABLED);
+    }
 
     lv_obj_t * bat_label = lv_label_create(panel1);
     lv_label_set_text(bat_label, "battery");
@@ -534,9 +569,10 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(Flash_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 4, 1);
     lv_obj_set_grid_cell(FlashSize, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 5, 1);
 
-    // 时间模块（行6-7）
+    // 时间模块（行6-7）- RTC time spans 4 columns, Sync button in last column
     lv_obj_set_grid_cell(Time_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 6, 1);
-    lv_obj_set_grid_cell(RTC_Time, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 7, 1);
+    lv_obj_set_grid_cell(RTC_Time, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 7, 1);
+    lv_obj_set_grid_cell(but_ntp_sync, LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 7, 1);
 
     // 电池模块（行8-9）
     lv_obj_set_grid_cell(bat_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 8, 1);
@@ -577,7 +613,15 @@ static void example1_increase_lvgl_tick(lv_timer_t * t)
     get_rtc_data_to_str(&now_time);
     snprintf(buf, sizeof(buf), "%d.%d.%d   %d:%d:%d\r\n",now_time.year,now_time.month,now_time.day,now_time.hour,now_time.min,now_time.sec);
     lv_textarea_set_placeholder_text(RTC_Time, buf);
-    //printf("%s\r\n",buf);
+
+    /* Update NTP sync button state based on WiFi connection */
+    if (but_ntp_sync != NULL) {
+        if (wifi_manager_is_connected()) {
+            lv_obj_clear_state(but_ntp_sync, LV_STATE_DISABLED);
+        } else {
+            lv_obj_add_state(but_ntp_sync, LV_STATE_DISABLED);
+        }
+    }
 }
 
 bool PhoneSettingConf::close(void)

@@ -422,6 +422,13 @@ esp_err_t pcf85063a_driver_init(void);
  */
 void get_rtc_data_to_str(pcf85063a_datetime_t *time);
 
+/**
+ * @brief Set RTC time
+ * @param[in] time Pointer to datetime structure with new time
+ * @return ESP_OK on success
+ */
+esp_err_t set_rtc_time(pcf85063a_datetime_t *time);
+
 /*===========================================================================
  * LVGL Display API
  *===========================================================================*/

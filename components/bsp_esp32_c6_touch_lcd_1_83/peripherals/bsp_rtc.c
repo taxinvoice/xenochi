@@ -60,3 +60,16 @@ void get_rtc_data_to_str(pcf85063a_datetime_t *time)
     // Read current time from RTC
     pcf85063a_get_time_date(&dev, time);
 }
+
+esp_err_t set_rtc_time(pcf85063a_datetime_t *time)
+{
+    esp_err_t ret = pcf85063a_set_time_date(&dev, *time);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "RTC set to: %04d-%02d-%02d %02d:%02d:%02d",
+            time->year, time->month, time->day,
+            time->hour, time->min, time->sec);
+    } else {
+        ESP_LOGE(TAG, "Failed to set RTC time (error: %d)", ret);
+    }
+    return ret;
+}

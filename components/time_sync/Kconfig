@@ -1,0 +1,28 @@
+menu "MiBuddy Time Sync Configuration"
+
+    config MIBUDDY_NTP_SERVER
+        string "NTP Server"
+        default "pool.ntp.org"
+        help
+            Primary NTP server for time synchronization.
+            Common options: pool.ntp.org, time.google.com, time.cloudflare.com
+
+    config MIBUDDY_TIMEZONE
+        string "Timezone (POSIX format)"
+        default "UTC0"
+        help
+            Timezone in POSIX format. Examples:
+            - UTC0 (UTC, no offset)
+            - EST5EDT,M3.2.0,M11.1.0 (US Eastern with DST)
+            - PST8PDT,M3.2.0,M11.1.0 (US Pacific with DST)
+            - CST-8 (China Standard Time)
+            - GMT0BST,M3.5.0/1,M10.5.0 (UK with DST)
+            - CET-1CEST,M3.5.0,M10.5.0/3 (Central Europe with DST)
+
+    config MIBUDDY_SYNC_ON_CONNECT
+        bool "Sync time when WiFi connects"
+        default y
+        help
+            Automatically sync time when WiFi connection is established.
+
+endmenu
