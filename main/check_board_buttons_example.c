@@ -12,6 +12,7 @@
 #include "esp_peripherals.h"
 #include "periph_adc_button.h"
 #include "input_key_service.h"
+#include "sdcard_player.h"
 
 static const char *TAG = "CHECK_BOARD_BUTTONS";
 
@@ -66,14 +67,24 @@ static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_ser
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "[ 1 ] Initialize peripherals");
+    ESP_LOGI(TAG, "[ 1 ] Initialize SD card and play startup sound");
+    esp_err_t ret = sdcard_player_init();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Playing startup sound...");
+        sdcard_player_play_startup();
+        ESP_LOGI(TAG, "Startup sound finished");
+    } else {
+        ESP_LOGW(TAG, "SD card player init failed: %s", esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(TAG, "[ 2 ] Initialize peripherals");
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
-    ESP_LOGI(TAG, "[ 2 ] Initialize Button peripheral with board init");
+    ESP_LOGI(TAG, "[ 3 ] Initialize Button peripheral with board init");
     audio_board_key_init(set);
 
-    ESP_LOGI(TAG, "[ 3 ] Create and start input key service");
+    ESP_LOGI(TAG, "[ 4 ] Create and start input key service");
     input_key_service_info_t input_key_info[] = INPUT_KEY_DEFAULT_INFO();
     input_key_service_cfg_t input_cfg = INPUT_KEY_SERVICE_DEFAULT_CONFIG();
     input_cfg.handle = set;
@@ -83,5 +94,5 @@ void app_main(void)
     input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
     periph_service_set_callback(input_ser, input_key_service_cb, NULL);
 
-    ESP_LOGW(TAG, "[ 4 ] Waiting for a button to be pressed ...");
+    ESP_LOGW(TAG, "[ 5 ] Waiting for a button to be pressed ...");
 }

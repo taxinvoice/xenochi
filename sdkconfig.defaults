@@ -21,3 +21,9 @@ CONFIG_ESPTOOLPY_BEFORE_RESET=y
 CONFIG_PARTITION_TABLE_SINGLE_APP=y
 CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
+
+#
+# Audio Configuration
+#
+CONFIG_AUDIO_SUPPORT_MP3_DECODER=y
+# end of Audio Configuration
