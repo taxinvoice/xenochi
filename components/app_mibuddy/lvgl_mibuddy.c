@@ -177,6 +177,28 @@ void lvgl_mibuddy_cleanup(void)
     s_embedded_index = 0;  /* Reset to show embedded images first on next open */
 }
 
+/**
+ * @brief Pause the slideshow
+ */
+void lvgl_mibuddy_pause(void)
+{
+    if (s_slideshow_timer != NULL) {
+        ESP_LOGI(TAG, "Pausing slideshow");
+        lv_timer_pause(s_slideshow_timer);
+    }
+}
+
+/**
+ * @brief Resume the slideshow
+ */
+void lvgl_mibuddy_resume(void)
+{
+    if (s_slideshow_timer != NULL && s_slideshow_active) {
+        ESP_LOGI(TAG, "Resuming slideshow");
+        lv_timer_resume(s_slideshow_timer);
+    }
+}
+
 /*===========================================================================
  * Static Functions
  *===========================================================================*/

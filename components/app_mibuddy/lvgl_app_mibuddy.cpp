@@ -2,13 +2,16 @@
  * @file lvgl_app_mibuddy.cpp
  * @brief MiBuddy App implementation for ESP-Brookesia Phone UI
  *
- * This application displays a slideshow of PNG images from the SD card.
- * Future: Will be extended to show a virtual buddy that reacts to inputs.
+ * This application displays a cute mochi avatar with:
+ * - 8 emotional states (Happy, Excited, Worried, Cool, Dizzy, Panic, Sleepy, Shocked)
+ * - 9 activity animations (Idle, Shake, Bounce, Spin, Wiggle, Nod, Blink, Snore, Vibrate)
+ * - 5 color themes (Sakura, Mint, Lavender, Peach, Cloud)
+ * - Particle effects
  *
  * Lifecycle:
- * - run(): Called when app launches - scans SD card and starts slideshow
+ * - run(): Called when app launches - creates mochi avatar
  * - back(): Called on back button - closes the app
- * - close(): Called on app exit - stops slideshow and cleans up
+ * - close(): Called on app exit - cleans up mochi resources
  */
 
 #include "lvgl_app_mibuddy.hpp"
@@ -17,7 +20,11 @@
 #include "private/esp_brookesia_utils.h"
 
 #include "app_mibuddy_assets.h"
+#include "mochi_state.h"
+
+extern "C" {
 #include "lvgl_mibuddy.h"
+}
 
 using namespace std;
 
@@ -59,7 +66,7 @@ PhoneMiBuddyConf::~PhoneMiBuddyConf()
 /**
  * @brief Called when the app is launched
  *
- * Scans the SD card for PNG images and creates the slideshow UI.
+ * Initializes and creates the mochi avatar.
  *
  * @return true on success
  */
@@ -67,8 +74,19 @@ bool PhoneMiBuddyConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
 
-    /* Create the slideshow UI on the active screen */
+#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Initialize and create mochi avatar */
+    mochi_init();
+    mochi_create(lv_screen_active());
+
+    /* Start with happy idle state */
+    mochi_set(MOCHI_STATE_HAPPY, MOCHI_ACTIVITY_IDLE);
+#endif
+
+#if 0  /* Temporarily disabled */
+    /* Create the slideshow UI (shows embedded images, then SD card PNGs) */
     lvgl_mibuddy_create(lv_screen_active());
+#endif
 
     return true;
 }
@@ -84,8 +102,15 @@ bool PhoneMiBuddyConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
 
-    /* Stop slideshow before closing */
+#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Cleanup mochi resources before closing */
+    mochi_deinit();
+#endif
+
+#if 0  /* Temporarily disabled */
+    /* Cleanup slideshow resources */
     lvgl_mibuddy_cleanup();
+#endif
 
     /* Notify core to close the app */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
@@ -96,7 +121,7 @@ bool PhoneMiBuddyConf::back(void)
 /**
  * @brief Called when the app is closed
  *
- * Stops the slideshow timer and cleans up resources.
+ * Cleans up mochi resources.
  *
  * @return true on success
  */
@@ -104,8 +129,15 @@ bool PhoneMiBuddyConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
 
-    /* Cleanup slideshow resources FIRST before notifying core */
+#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Cleanup mochi resources FIRST before notifying core */
+    mochi_deinit();
+#endif
+
+#if 0  /* Temporarily disabled */
+    /* Cleanup slideshow resources */
     lvgl_mibuddy_cleanup();
+#endif
 
     /* Notify core that app is closing */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
@@ -116,7 +148,7 @@ bool PhoneMiBuddyConf::close(void)
 /**
  * @brief Called when the app is paused (e.g., switching to another app)
  *
- * Stops the slideshow timer while app is in background.
+ * Pauses mochi animations while app is in background.
  *
  * @return true on success
  */
@@ -124,8 +156,15 @@ bool PhoneMiBuddyConf::pause(void)
 {
     ESP_BROOKESIA_LOGD("Pause");
 
-    /* Stop slideshow when app is paused */
-    lvgl_mibuddy_cleanup();
+#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Pause mochi when app is paused */
+    mochi_pause();
+#endif
+
+#if 0  /* Temporarily disabled */
+    /* Pause slideshow timer */
+    lvgl_mibuddy_pause();
+#endif
 
     return true;
 }
@@ -133,7 +172,7 @@ bool PhoneMiBuddyConf::pause(void)
 /**
  * @brief Called when the app is resumed from pause
  *
- * Restarts the slideshow timer.
+ * Resumes mochi animations.
  *
  * @return true on success
  */
@@ -141,8 +180,15 @@ bool PhoneMiBuddyConf::resume(void)
 {
     ESP_BROOKESIA_LOGD("Resume");
 
-    /* Restart slideshow when app is resumed */
-    lvgl_mibuddy_create(lv_screen_active());
+#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Resume mochi when app is resumed */
+    mochi_resume();
+#endif
+
+#if 0  /* Temporarily disabled */
+    /* Resume slideshow timer */
+    lvgl_mibuddy_resume();
+#endif
 
     return true;
 }

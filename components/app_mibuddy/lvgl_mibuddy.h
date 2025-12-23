@@ -31,6 +31,20 @@ void lvgl_mibuddy_create(lv_obj_t *parent);
  */
 void lvgl_mibuddy_cleanup(void);
 
+/**
+ * @brief Pause the slideshow
+ *
+ * Pauses the slideshow timer. Call when app goes to background.
+ */
+void lvgl_mibuddy_pause(void);
+
+/**
+ * @brief Resume the slideshow
+ *
+ * Resumes the slideshow timer. Call when app returns to foreground.
+ */
+void lvgl_mibuddy_resume(void);
+
 #ifdef __cplusplus
 }
 #endif
