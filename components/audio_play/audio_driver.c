@@ -115,7 +115,14 @@ void player_task(void *pvParameters)
                     }
 
                     Audio_PA_DIS();                              /* Disable amp during transition */
-                    esp_audio_simple_player_stop(handle);        /* Stop any current playback */
+
+                    /* Only stop if currently playing to avoid NULL pipeline error */
+                    esp_asp_state_t state;
+                    if (esp_audio_simple_player_get_state(handle, &state) == ESP_GMF_ERR_OK) {
+                        if (state == ESP_ASP_STATE_RUNNING || state == ESP_ASP_STATE_PAUSED) {
+                            esp_audio_simple_player_stop(handle);
+                        }
+                    }
 
                     /* Close previous file if still open */
                     if (audio_file != NULL) {
@@ -146,11 +153,18 @@ void player_task(void *pvParameters)
                     break;
                 }
 
-                case CMD_STOP:
+                case CMD_STOP: {
                     /* Stop playback completely */
                     ESP_LOGD(TAG, "Stop");
+
+                    /* Only stop if currently playing to avoid NULL pipeline error */
                     if (handle != NULL) {
-                        esp_audio_simple_player_stop(handle);
+                        esp_asp_state_t state;
+                        if (esp_audio_simple_player_get_state(handle, &state) == ESP_GMF_ERR_OK) {
+                            if (state == ESP_ASP_STATE_RUNNING || state == ESP_ASP_STATE_PAUSED) {
+                                esp_audio_simple_player_stop(handle);
+                            }
+                        }
                     }
                     /* Close audio file */
                     if (audio_file != NULL) {
@@ -159,6 +173,7 @@ void player_task(void *pvParameters)
                     }
                     Audio_PA_DIS();  /* Disable amp to save power */
                     break;
+                }
 
                 case CMD_PAUSE:
                     /* Pause current playback (can resume later) */

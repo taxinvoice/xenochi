@@ -2229,6 +2229,13 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# MiBuddy Configuration
+#
+CONFIG_MIBUDDY_INPUT_INTERVAL_MS=100
+CONFIG_MIBUDDY_API_URL="http://10.0.13.101:8080/mochi/state"
+# end of MiBuddy Configuration
+
+#
 # Net API Configuration
 #
 CONFIG_NET_API_TIMEOUT_MS=10000

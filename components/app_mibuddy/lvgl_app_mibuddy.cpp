@@ -45,7 +45,7 @@ using namespace std;
 #ifdef CONFIG_MIBUDDY_INPUT_INTERVAL_MS
 static uint32_t s_input_timer_interval_ms = CONFIG_MIBUDDY_INPUT_INTERVAL_MS;
 #else
-static uint32_t s_input_timer_interval_ms = 2000;  /* Default 2000ms if Kconfig not set */
+static uint32_t s_input_timer_interval_ms = 200;  /* Default 2000ms if Kconfig not set */
 #endif
 
 static lv_timer_t *s_input_timer = NULL;
@@ -123,13 +123,33 @@ static void default_input_mapper(
 
         /* ── Calculated Variables ── */
         ESP_LOGI(MAP_TAG, "--- CALCULATED ---");
-        ESP_LOGI(MAP_TAG, "accel_magnitude: %.2f g", input->accel_magnitude);
-        ESP_LOGI(MAP_TAG, "is_low_battery: %s (<%20%%)", input->is_low_battery ? "YES" : "no");
-        ESP_LOGI(MAP_TAG, "is_critical_battery: %s (<%5%%)", input->is_critical_battery ? "YES" : "no");
-        ESP_LOGI(MAP_TAG, "is_moving: %s (mag>0.3g)", input->is_moving ? "YES" : "no");
-        ESP_LOGI(MAP_TAG, "is_shaking: %s (mag>2.0g)", input->is_shaking ? "YES" : "no");
-        ESP_LOGI(MAP_TAG, "is_night: %s (22-6)", input->is_night ? "YES" : "no");
-        ESP_LOGI(MAP_TAG, "is_weekend: %s", input->is_weekend ? "YES" : "no");
+
+        /* Motion */
+        ESP_LOGI(MAP_TAG, "accel_mag: %.2fg, gyro_mag: %.1f°/s",
+                 input->accel_magnitude, input->gyro_magnitude);
+        ESP_LOGI(MAP_TAG, "is_moving: %s | is_shaking: %s | is_rotating: %s | is_spinning: %s",
+                 input->is_moving ? "YES" : "no",
+                 input->is_shaking ? "YES" : "no",
+                 input->is_rotating ? "YES" : "no",
+                 input->is_spinning ? "YES" : "no");
+
+        /* Orientation */
+        const char *orient = "unknown";
+        if (input->is_face_up) orient = "FACE_UP";
+        else if (input->is_face_down) orient = "FACE_DOWN";
+        else if (input->is_portrait) orient = "PORTRAIT";
+        else if (input->is_portrait_inv) orient = "PORTRAIT_INV";
+        else if (input->is_landscape_left) orient = "LANDSCAPE_LEFT";
+        else if (input->is_landscape_right) orient = "LANDSCAPE_RIGHT";
+        ESP_LOGI(MAP_TAG, "Orientation: %s, pitch: %.1f°, roll: %.1f°",
+                 orient, input->pitch, input->roll);
+
+        /* Battery/Time */
+        ESP_LOGI(MAP_TAG, "low_batt: %s | critical: %s | night: %s | weekend: %s",
+                 input->is_low_battery ? "YES" : "no",
+                 input->is_critical_battery ? "YES" : "no",
+                 input->is_night ? "YES" : "no",
+                 input->is_weekend ? "YES" : "no");
 
         ESP_LOGI(MAP_TAG, "--- DECISION LOGIC ---");
     }
@@ -147,6 +167,17 @@ static void default_input_mapper(
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=false, continue...");
 
+    /* Spinning fast -> DIZZY */
+    if (input->is_spinning) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_spinning=TRUE -> DIZZY+SPIN");
+        *out_state = MOCHI_STATE_DIZZY;
+        *out_activity = MOCHI_ACTIVITY_SPIN;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_spinning=false, continue...");
+
     /* Critical battery -> WORRIED */
     if (input->is_critical_battery) {
         if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=TRUE -> WORRIED+IDLE");
@@ -157,6 +188,28 @@ static void default_input_mapper(
         return;
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=false, continue...");
+
+    /* Face down -> SLEEPY (device put down to rest) */
+    if (input->is_face_down) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_face_down=TRUE -> SLEEPY+SNORE");
+        *out_state = MOCHI_STATE_SLEEPY;
+        *out_activity = MOCHI_ACTIVITY_SNORE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_face_down=false, continue...");
+
+    /* Upside down -> SHOCKED */
+    if (input->is_portrait_inv) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_portrait_inv=TRUE -> SHOCKED+WIGGLE");
+        *out_state = MOCHI_STATE_SHOCKED;
+        *out_activity = MOCHI_ACTIVITY_WIGGLE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_portrait_inv=false, continue...");
 
     /* Night time -> SLEEPY */
     if (input->is_night) {
@@ -169,6 +222,17 @@ static void default_input_mapper(
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_night=false, continue...");
 
+    /* Rotating gently -> COOL with NOD */
+    if (input->is_rotating) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_rotating=TRUE -> COOL+NOD");
+        *out_state = MOCHI_STATE_COOL;
+        *out_activity = MOCHI_ACTIVITY_NOD;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_rotating=false, continue...");
+
     /* Moving around -> EXCITED */
     if (input->is_moving) {
         if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=TRUE -> EXCITED+BOUNCE");
@@ -180,10 +244,21 @@ static void default_input_mapper(
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=false, continue...");
 
-    /* Low battery (but not critical) -> COOL (taking it easy) */
-    if (input->is_low_battery) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=TRUE -> COOL+IDLE");
+    /* Landscape orientation -> COOL (relaxed viewing) */
+    if (input->is_landscape_left || input->is_landscape_right) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_landscape=TRUE -> COOL+IDLE");
         *out_state = MOCHI_STATE_COOL;
+        *out_activity = MOCHI_ACTIVITY_IDLE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_landscape=false, continue...");
+
+    /* Low battery (but not critical) -> WORRIED */
+    if (input->is_low_battery) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=TRUE -> WORRIED+IDLE");
+        *out_state = MOCHI_STATE_WORRIED;
         *out_activity = MOCHI_ACTIVITY_IDLE;
         if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
                               mochi_state_name(*out_state), mochi_activity_name(*out_activity));

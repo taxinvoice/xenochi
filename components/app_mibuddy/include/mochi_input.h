@@ -65,11 +65,43 @@ typedef struct {
 
     /* ── Calculated Variables (derived from static) ── */
 
+    /* Battery */
     bool  is_low_battery;        /**< battery_pct < 20 */
     bool  is_critical_battery;   /**< battery_pct < 5 */
+
+    /* Motion detection */
     float accel_magnitude;       /**< sqrt(x^2 + y^2 + z^2) */
-    bool  is_moving;             /**< accel_magnitude > 0.3g (away from 1g rest) */
+    bool  is_moving;             /**< accel_magnitude deviates from 1g (rest) */
     bool  is_shaking;            /**< accel_magnitude > 2.0g (strong motion) */
+
+    /* Device orientation (from accelerometer gravity vector)
+     * These are mutually exclusive - only one will be true at a time.
+     * Requires device to be relatively stationary for accurate reading.
+     *
+     * Coordinate system (screen facing user):
+     *   +X = right edge of screen
+     *   +Y = top edge of screen
+     *   +Z = towards user (out of screen)
+     */
+    bool  is_face_up;            /**< Screen facing up (Z ≈ +1g) */
+    bool  is_face_down;          /**< Screen facing down (Z ≈ -1g) */
+    bool  is_portrait;           /**< Upright, top up (Y ≈ -1g) */
+    bool  is_portrait_inv;       /**< Upside down, top down (Y ≈ +1g) */
+    bool  is_landscape_left;     /**< Left edge down (X ≈ +1g) */
+    bool  is_landscape_right;    /**< Right edge down (X ≈ -1g) */
+
+    /* Tilt angles (degrees from horizontal plane)
+     * Calculated from accelerometer when relatively stationary.
+     */
+    float pitch;                 /**< Forward/backward tilt: -90 (face down) to +90 (face up) */
+    float roll;                  /**< Left/right tilt: -180 to +180 */
+
+    /* Rotation detection (from gyroscope) */
+    float gyro_magnitude;        /**< sqrt(gx^2 + gy^2 + gz^2) in deg/s */
+    bool  is_rotating;           /**< Device being rotated (gyro > 30 deg/s) */
+    bool  is_spinning;           /**< Fast rotation (gyro > 100 deg/s) */
+
+    /* Time */
     bool  is_night;              /**< hour in [22..6] */
     bool  is_weekend;            /**< Saturday or Sunday */
 

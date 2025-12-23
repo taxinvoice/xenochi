@@ -141,7 +141,7 @@ static void compute_calculated_inputs(void)
     s_input.state.is_low_battery = (s_input.state.battery_pct < 20.0f);
     s_input.state.is_critical_battery = (s_input.state.battery_pct < 5.0f);
 
-    /* Acceleration magnitude (distance from rest at 1g) */
+    /* Acceleration magnitude */
     float ax = s_input.state.accel_x;
     float ay = s_input.state.accel_y;
     float az = s_input.state.accel_z;
@@ -151,6 +151,72 @@ static void compute_calculated_inputs(void)
     float deviation = fabsf(s_input.state.accel_magnitude - 1.0f);
     s_input.state.is_moving = (deviation > 0.3f);
     s_input.state.is_shaking = (s_input.state.accel_magnitude > 2.0f);
+
+    /* Gyroscope magnitude and rotation detection */
+    float gx = s_input.state.gyro_x;
+    float gy = s_input.state.gyro_y;
+    float gz = s_input.state.gyro_z;
+    s_input.state.gyro_magnitude = sqrtf(gx*gx + gy*gy + gz*gz);
+    s_input.state.is_rotating = (s_input.state.gyro_magnitude > 30.0f);
+    s_input.state.is_spinning = (s_input.state.gyro_magnitude > 100.0f);
+
+    /* Device orientation from gravity vector
+     * Only reliable when device is relatively stationary (low gyro)
+     * Threshold: 0.7g to account for tilted orientations
+     */
+    const float ORIENT_THRESHOLD = 0.7f;
+
+    /* Clear all orientation flags first */
+    s_input.state.is_face_up = false;
+    s_input.state.is_face_down = false;
+    s_input.state.is_portrait = false;
+    s_input.state.is_portrait_inv = false;
+    s_input.state.is_landscape_left = false;
+    s_input.state.is_landscape_right = false;
+
+    /* Find dominant axis - only set orientation if clearly dominant */
+    float abs_x = fabsf(ax);
+    float abs_y = fabsf(ay);
+    float abs_z = fabsf(az);
+
+    if (abs_z > abs_x && abs_z > abs_y && abs_z > ORIENT_THRESHOLD) {
+        /* Z-axis dominant: face up or face down */
+        if (az > 0) {
+            s_input.state.is_face_up = true;
+        } else {
+            s_input.state.is_face_down = true;
+        }
+    } else if (abs_y > abs_x && abs_y > abs_z && abs_y > ORIENT_THRESHOLD) {
+        /* Y-axis dominant: portrait or portrait inverted */
+        if (ay < 0) {
+            s_input.state.is_portrait = true;      /* Top up, gravity pulling down */
+        } else {
+            s_input.state.is_portrait_inv = true;  /* Top down, gravity pulling up */
+        }
+    } else if (abs_x > abs_y && abs_x > abs_z && abs_x > ORIENT_THRESHOLD) {
+        /* X-axis dominant: landscape left or right */
+        if (ax > 0) {
+            s_input.state.is_landscape_left = true;   /* Left edge down */
+        } else {
+            s_input.state.is_landscape_right = true;  /* Right edge down */
+        }
+    }
+
+    /* Tilt angles (pitch and roll) from accelerometer
+     * Pitch: rotation around X-axis (forward/backward tilt)
+     * Roll: rotation around Y-axis (left/right tilt)
+     *
+     * Using atan2 for full range and handling edge cases
+     */
+    const float RAD_TO_DEG = 180.0f / 3.14159265f;
+
+    /* Pitch: angle between Z-axis and horizontal plane
+     * Positive = screen facing up, Negative = screen facing down */
+    s_input.state.pitch = atan2f(az, sqrtf(ax*ax + ay*ay)) * RAD_TO_DEG;
+
+    /* Roll: rotation around the front-back axis
+     * Positive = tilted right, Negative = tilted left */
+    s_input.state.roll = atan2f(ax, ay) * RAD_TO_DEG;
 
     /* Time of day */
     int hour = s_input.state.hour;
@@ -483,16 +549,38 @@ static esp_err_t api_query_blocking(
 
     /* Build JSON request body */
     cJSON *root = cJSON_CreateObject();
+
+    /* Basic inputs */
     cJSON_AddNumberToObject(root, "battery", input->battery_pct);
     cJSON_AddBoolToObject(root, "charging", input->is_charging);
     cJSON_AddNumberToObject(root, "hour", input->hour);
     cJSON_AddNumberToObject(root, "minute", input->minute);
-    cJSON_AddBoolToObject(root, "moving", input->is_moving);
-    cJSON_AddBoolToObject(root, "shaking", input->is_shaking);
-    cJSON_AddBoolToObject(root, "night", input->is_night);
-    cJSON_AddBoolToObject(root, "low_battery", input->is_low_battery);
     cJSON_AddBoolToObject(root, "wifi", input->wifi_connected);
     cJSON_AddBoolToObject(root, "touch", input->touch_active);
+
+    /* Motion detection */
+    cJSON_AddBoolToObject(root, "moving", input->is_moving);
+    cJSON_AddBoolToObject(root, "shaking", input->is_shaking);
+    cJSON_AddBoolToObject(root, "rotating", input->is_rotating);
+    cJSON_AddBoolToObject(root, "spinning", input->is_spinning);
+
+    /* Device orientation */
+    cJSON_AddBoolToObject(root, "face_up", input->is_face_up);
+    cJSON_AddBoolToObject(root, "face_down", input->is_face_down);
+    cJSON_AddBoolToObject(root, "portrait", input->is_portrait);
+    cJSON_AddBoolToObject(root, "portrait_inv", input->is_portrait_inv);
+    cJSON_AddBoolToObject(root, "landscape_left", input->is_landscape_left);
+    cJSON_AddBoolToObject(root, "landscape_right", input->is_landscape_right);
+
+    /* Tilt angles (rounded to 1 decimal) */
+    cJSON_AddNumberToObject(root, "pitch", roundf(input->pitch * 10.0f) / 10.0f);
+    cJSON_AddNumberToObject(root, "roll", roundf(input->roll * 10.0f) / 10.0f);
+
+    /* Time/battery thresholds */
+    cJSON_AddBoolToObject(root, "night", input->is_night);
+    cJSON_AddBoolToObject(root, "weekend", input->is_weekend);
+    cJSON_AddBoolToObject(root, "low_battery", input->is_low_battery);
+    cJSON_AddBoolToObject(root, "critical_battery", input->is_critical_battery);
 
     char *post_data = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
