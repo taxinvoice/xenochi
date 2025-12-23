@@ -111,6 +111,26 @@ esp_err_t time_sync_update_rtc(void);
  */
 esp_err_t time_sync_load_from_rtc(void);
 
+/**
+ * @brief Get the timestamp of the last successful NTP sync
+ *
+ * This value is persisted in NVS across reboots.
+ *
+ * @return Unix timestamp of last NTP sync, or 0 if never synced
+ */
+time_t time_sync_get_last_ntp_time(void);
+
+/**
+ * @brief Get the last NTP sync time as a formatted string
+ *
+ * Returns the last successful NTP sync time in "YYYY-MM-DD HH:MM:SS" format,
+ * or "Never" if no sync has occurred.
+ *
+ * @param buf Buffer to store the formatted string
+ * @param buf_len Size of the buffer
+ */
+void time_sync_get_last_ntp_str(char *buf, size_t buf_len);
+
 #ifdef __cplusplus
 }
 #endif

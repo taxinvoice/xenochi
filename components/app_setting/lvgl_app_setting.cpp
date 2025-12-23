@@ -51,6 +51,7 @@ static lv_style_t style_textarea_placeholder; /**< Dark placeholder text style *
 static lv_obj_t * SD_Size;                  /**< SD card size text area */
 static lv_obj_t * FlashSize;                /**< Flash size text area */
 static lv_obj_t * RTC_Time;                 /**< RTC time display */
+static lv_obj_t * Last_NTP_Sync;            /**< Last NTP sync time display */
 static lv_obj_t * but_ntp_sync;             /**< NTP sync button */
 static lv_obj_t * but_bat_msg;              /**< Battery info button */
 static lv_obj_t * but_wifi_msg;             /**< WiFi scan button */
@@ -557,6 +558,18 @@ bool PhoneSettingConf::run(void)
         lv_obj_add_state(but_ntp_sync, LV_STATE_DISABLED);
     }
 
+    /* Last NTP Sync time display */
+    lv_obj_t * Last_NTP_label = lv_label_create(panel1);
+    lv_label_set_text(Last_NTP_label, "Last NTP Sync");
+    lv_obj_add_style(Last_NTP_label, &style_text_muted, 0);
+
+    Last_NTP_Sync = lv_textarea_create(panel1);
+    lv_textarea_set_one_line(Last_NTP_Sync, true);
+    lv_obj_add_style(Last_NTP_Sync, &style_textarea_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
+    char ntp_buf[32];
+    time_sync_get_last_ntp_str(ntp_buf, sizeof(ntp_buf));
+    lv_textarea_set_placeholder_text(Last_NTP_Sync, ntp_buf);
+
     lv_obj_t * bat_label = lv_label_create(panel1);
     lv_label_set_text(bat_label, "battery");
     lv_obj_add_style(bat_label, &style_text_muted, 0);
@@ -635,15 +648,17 @@ bool PhoneSettingConf::run(void)
         40,               /*5: Flash Size*/
         LV_GRID_CONTENT,  /*6: Time label*/
         40,               /*7: RTC Time*/
-        LV_GRID_CONTENT,  /*8: bat label*/
-        40,               /*9: bat button*/
-        LV_GRID_CONTENT,  /*10: wifi label*/
-        40,               /*11: wifi button*/
-        LV_GRID_CONTENT,  /*12: Backlight label*/
-        40,               /*13: Backlight slider*/
-        LV_GRID_CONTENT,  /*14: Logging label*/
-        35,               /*15: Logging controls*/
-        30,               /*16: Bottom padding/gap*/
+        LV_GRID_CONTENT,  /*8: Last NTP label*/
+        40,               /*9: Last NTP Sync*/
+        LV_GRID_CONTENT,  /*10: bat label*/
+        40,               /*11: bat button*/
+        LV_GRID_CONTENT,  /*12: wifi label*/
+        40,               /*13: wifi button*/
+        LV_GRID_CONTENT,  /*14: Backlight label*/
+        40,               /*15: Backlight slider*/
+        LV_GRID_CONTENT,  /*16: Logging label*/
+        35,               /*17: Logging controls*/
+        30,               /*18: Bottom padding/gap*/
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -667,32 +682,36 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(RTC_Time, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 7, 1);
     lv_obj_set_grid_cell(but_ntp_sync, LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 7, 1);
 
-    // 电池模块（行8-9）
-    lv_obj_set_grid_cell(bat_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 8, 1);
-    lv_obj_set_grid_cell(but_bat_msg, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 9, 1);
+    // Last NTP Sync module (rows 8-9)
+    lv_obj_set_grid_cell(Last_NTP_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 8, 1);
+    lv_obj_set_grid_cell(Last_NTP_Sync, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 9, 1);
 
-    // WiFi模块（行10-11）
-    lv_obj_set_grid_cell(wifi_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 10, 1);
-    lv_obj_set_grid_cell(but_wifi_msg, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 11, 1);
+    // 电池模块（行10-11）
+    lv_obj_set_grid_cell(bat_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 10, 1);
+    lv_obj_set_grid_cell(but_bat_msg, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 11, 1);
 
-    // 背光模块（行12-13）
-    lv_obj_set_grid_cell(Backlight_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 12, 1);
-    lv_obj_set_grid_cell(Backlight_slider, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 13, 1);
+    // WiFi模块（行12-13）
+    lv_obj_set_grid_cell(wifi_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 12, 1);
+    lv_obj_set_grid_cell(but_wifi_msg, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 13, 1);
 
-    // File Logging module (rows 14-15)
-    lv_obj_set_grid_cell(logging_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 14, 1);
-    lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 15, 1);
-    lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 15, 1);
-    lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 15, 1);
+    // 背光模块（行14-15）
+    lv_obj_set_grid_cell(Backlight_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 14, 1);
+    lv_obj_set_grid_cell(Backlight_slider, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 15, 1);
 
-    // Bottom separator line (row 16) - creates gap at bottom of settings
+    // File Logging module (rows 16-17)
+    lv_obj_set_grid_cell(logging_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 16, 1);
+    lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 17, 1);
+    lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 17, 1);
+    lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 17, 1);
+
+    // Bottom separator line (row 18) - creates gap at bottom of settings
     lv_obj_t *bottom_line = lv_obj_create(panel1);
     lv_obj_set_size(bottom_line, LV_PCT(100), 2);
     lv_obj_set_style_bg_color(bottom_line, lv_color_hex(0x333333), 0);
     lv_obj_set_style_bg_opa(bottom_line, LV_OPA_50, 0);
     lv_obj_set_style_border_width(bottom_line, 0, 0);
     lv_obj_set_style_radius(bottom_line, 0, 0);
-    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 16, 1);
+    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 18, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 
@@ -720,6 +739,13 @@ static void example1_increase_lvgl_tick(lv_timer_t * t)
     get_rtc_data_to_str(&now_time);
     snprintf(buf, sizeof(buf), "%d.%d.%d   %d:%d:%d\r\n",now_time.year,now_time.month,now_time.day,now_time.hour,now_time.min,now_time.sec);
     lv_textarea_set_placeholder_text(RTC_Time, buf);
+
+    /* Update Last NTP Sync display */
+    if (Last_NTP_Sync != NULL) {
+        char ntp_buf[32];
+        time_sync_get_last_ntp_str(ntp_buf, sizeof(ntp_buf));
+        lv_textarea_set_placeholder_text(Last_NTP_Sync, ntp_buf);
+    }
 
     /* Update NTP sync button state based on WiFi connection */
     if (but_ntp_sync != NULL) {

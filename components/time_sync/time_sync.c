@@ -34,15 +34,67 @@
 #include "lwip/netdb.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include <string.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
+
+/* NVS storage keys */
+#define NVS_NAMESPACE "time_sync"
+#define NVS_KEY_LAST_SYNC "last_ntp_sync"
 
 static const char *TAG = "time_sync";
 
 /* Module state */
 static time_sync_callback_t s_callback = NULL;
 static volatile bool s_is_synced = false;
+static time_t s_last_ntp_sync = 0;  /* Last successful NTP sync timestamp */
+
+/**
+ * @brief Save last NTP sync time to NVS
+ */
+static void save_last_sync_to_nvs(time_t sync_time)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for writing: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_i64(handle, NVS_KEY_LAST_SYNC, (int64_t)sync_time);
+    if (err == ESP_OK) {
+        nvs_commit(handle);
+        ESP_LOGD(TAG, "Saved last NTP sync time to NVS: %lld", (long long)sync_time);
+    } else {
+        ESP_LOGW(TAG, "Failed to save last sync time: %s", esp_err_to_name(err));
+    }
+
+    nvs_close(handle);
+}
+
+/**
+ * @brief Load last NTP sync time from NVS
+ */
+static void load_last_sync_from_nvs(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "No saved NTP sync time in NVS");
+        return;
+    }
+
+    int64_t saved_time = 0;
+    err = nvs_get_i64(handle, NVS_KEY_LAST_SYNC, &saved_time);
+    if (err == ESP_OK && saved_time > 0) {
+        s_last_ntp_sync = (time_t)saved_time;
+        ESP_LOGI(TAG, "Loaded last NTP sync time from NVS: %lld", (long long)s_last_ntp_sync);
+    }
+
+    nvs_close(handle);
+}
 
 /**
  * @brief Set a public DNS server as fallback if router DNS fails
@@ -240,11 +292,15 @@ static void time_sync_notification_cb(struct timeval *tv)
 
     s_is_synced = true;
 
-    /* Log network info for debugging */
-    log_network_info();
-
     /* Log the synchronized time */
     time_t now = tv->tv_sec;
+
+    /* Save last sync time to memory and NVS */
+    s_last_ntp_sync = now;
+    save_last_sync_to_nvs(now);
+
+    /* Log network info for debugging */
+    log_network_info();
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);
 
@@ -286,6 +342,9 @@ void time_sync_init(time_sync_callback_t callback)
 {
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "Initializing time sync module");
+
+    /* Load last NTP sync time from NVS */
+    load_last_sync_from_nvs();
 
     s_callback = callback;
 #ifdef CONFIG_MIBUDDY_NTP_SERVER
@@ -459,4 +518,27 @@ esp_err_t time_sync_load_from_rtc(void)
         rtc_time.hour, rtc_time.min, rtc_time.sec);
 
     return ESP_OK;
+}
+
+time_t time_sync_get_last_ntp_time(void)
+{
+    return s_last_ntp_sync;
+}
+
+void time_sync_get_last_ntp_str(char *buf, size_t buf_len)
+{
+    if (buf == NULL || buf_len == 0) {
+        return;
+    }
+
+    if (s_last_ntp_sync == 0) {
+        snprintf(buf, buf_len, "Never");
+        return;
+    }
+
+    struct tm timeinfo;
+    localtime_r(&s_last_ntp_sync, &timeinfo);
+    snprintf(buf, buf_len, "%04d-%02d-%02d %02d:%02d:%02d",
+        timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+        timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 }
