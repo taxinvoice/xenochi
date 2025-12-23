@@ -81,3 +81,27 @@ protected:
      */
     bool resume(void) override;
 };
+
+/*===========================================================================
+ * MiBuddy Configuration Functions
+ *===========================================================================*/
+
+/**
+ * @brief Set the input mapper timer interval
+ *
+ * Controls how often sensor data is collected and the mapper runs.
+ * Can be called at any time - will update running timer.
+ *
+ * @param interval_ms Interval in milliseconds (clamped to 50-5000ms)
+ *                    - 100ms (10Hz) - Default, responsive
+ *                    - 500ms (2Hz) - Low power mode
+ *                    - 1000ms (1Hz) - Very low power
+ */
+void mibuddy_set_input_interval(uint32_t interval_ms);
+
+/**
+ * @brief Get the current input mapper timer interval
+ *
+ * @return Interval in milliseconds
+ */
+uint32_t mibuddy_get_input_interval(void);

@@ -23,7 +23,7 @@ static const char *TAG = "mochi_particles";
  *===========================================================================*/
 
 #define PI                      3.14159265358979f
-#define PARTICLE_TIMER_MS       33  /* ~30 FPS */
+#define PARTICLE_TIMER_MS       50  /* 20 FPS - matches face animation */
 #define DISPLAY_WIDTH           240
 #define DISPLAY_HEIGHT          284
 #define CENTER_X                120
@@ -221,9 +221,10 @@ static void update_sparkle_particles(uint32_t frame) {
 
         lv_obj_set_pos(s_particles.particles[i], x - 5, y - 5);
 
-        /* Rotate the sparkle (using transform if available) */
-        int32_t angle = (int32_t)((frame * 3 + i * 45) % 360) * 10;
-        lv_obj_set_style_transform_rotation(s_particles.particles[i], angle, 0);
+        /* Removed rotation transform - too expensive for software rendering
+         * Instead, use opacity pulsing for sparkle effect */
+        lv_opa_t opa = (lv_opa_t)(120 + sinf(t * 2.0f + i * 1.5f) * 80);
+        lv_obj_set_style_bg_opa(s_particles.particles[i], opa, 0);
     }
 }
 

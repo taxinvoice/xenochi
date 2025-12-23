@@ -25,7 +25,7 @@ static const char *TAG = "mochi_anim";
  * Animation Parameters
  *===========================================================================*/
 
-#define ANIM_TIMER_PERIOD_MS    25  /* 40 FPS */
+#define ANIM_TIMER_PERIOD_MS    50  /* 20 FPS - reduced from 40 FPS to prevent watchdog timeout */
 #define PI                      3.14159265358979f
 
 /* Animation frequencies in Hz */

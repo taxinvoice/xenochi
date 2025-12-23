@@ -17,10 +17,13 @@
 #include "lvgl_app_mibuddy.hpp"
 #include "lvgl.h"
 #include "esp_brookesia.hpp"
+#include "esp_log.h"
 #include "private/esp_brookesia_utils.h"
+#include <cstdio>
 
 #include "app_mibuddy_assets.h"
 #include "mochi_state.h"
+#include "mochi_input.h"
 #include "audio_driver.h"
 
 extern "C" {
@@ -30,49 +33,218 @@ extern "C" {
 using namespace std;
 
 /*===========================================================================
- * State Cycling for Touch Demo
+ * Input System Configuration
  *===========================================================================*/
 
-static int s_current_state = 0;
-static int s_current_activity = 0;
+/**
+ * @brief Input mapper timer interval in milliseconds
+ *
+ * Default from Kconfig (CONFIG_MIBUDDY_INPUT_INTERVAL_MS).
+ * Can be changed at runtime with mibuddy_set_input_interval().
+ */
+#ifdef CONFIG_MIBUDDY_INPUT_INTERVAL_MS
+static uint32_t s_input_timer_interval_ms = CONFIG_MIBUDDY_INPUT_INTERVAL_MS;
+#else
+static uint32_t s_input_timer_interval_ms = 2000;  /* Default 2000ms if Kconfig not set */
+#endif
+
+static lv_timer_t *s_input_timer = NULL;
+
+/**
+ * @brief Set the input mapper timer interval
+ *
+ * @param interval_ms Interval in milliseconds (min 50ms, max 5000ms)
+ */
+void mibuddy_set_input_interval(uint32_t interval_ms)
+{
+    /* Clamp to reasonable range */
+    if (interval_ms < 50) interval_ms = 50;
+    if (interval_ms > 5000) interval_ms = 5000;
+
+    s_input_timer_interval_ms = interval_ms;
+    ESP_LOGI("MiBuddy", "Input interval set to %lums (%.1f Hz)",
+             (unsigned long)interval_ms, 1000.0f / interval_ms);
+
+    /* Update running timer if it exists */
+    if (s_input_timer != NULL) {
+        lv_timer_set_period(s_input_timer, interval_ms);
+        ESP_LOGI("MiBuddy", "Timer period updated");
+    }
+}
+
+/**
+ * @brief Get the current input mapper timer interval
+ *
+ * @return Interval in milliseconds
+ */
+uint32_t mibuddy_get_input_interval(void)
+{
+    return s_input_timer_interval_ms;
+}
+
+/**
+ * @brief Default mapper function - maps inputs to mochi state
+ *
+ * This is a simple example mapper. Users can replace this with their own logic.
+ * The mapper examines input state and decides which mochi state/activity to use.
+ */
+static void default_input_mapper(
+    const mochi_input_state_t *input,
+    mochi_state_t *out_state,
+    mochi_activity_t *out_activity)
+{
+    static const char *MAP_TAG = "input_mapper";
+    static int call_count = 0;
+    call_count++;
+
+    /* Log every 10th call to reduce spam, or every call if you want full verbosity */
+    bool verbose = (call_count % 10 == 1);  /* Change to (true) for every call */
+
+    if (verbose) {
+        ESP_LOGI(MAP_TAG, "========================================");
+        ESP_LOGI(MAP_TAG, "MAPPER CALL #%d", call_count);
+        ESP_LOGI(MAP_TAG, "========================================");
+
+        /* ── Static Variables ── */
+        ESP_LOGI(MAP_TAG, "--- STATIC INPUTS ---");
+        ESP_LOGI(MAP_TAG, "Battery: %.1f%%, charging: %s, temp: %.1f°C",
+                 input->battery_pct,
+                 input->is_charging ? "YES" : "NO",
+                 input->temperature);
+        ESP_LOGI(MAP_TAG, "Time: %02d:%02d, day_of_week: %d",
+                 input->hour, input->minute, input->day_of_week);
+        ESP_LOGI(MAP_TAG, "Accel: X=%.2f Y=%.2f Z=%.2f g",
+                 input->accel_x, input->accel_y, input->accel_z);
+        ESP_LOGI(MAP_TAG, "Gyro: X=%.1f Y=%.1f Z=%.1f deg/s",
+                 input->gyro_x, input->gyro_y, input->gyro_z);
+        ESP_LOGI(MAP_TAG, "WiFi: %s, Touch: %s",
+                 input->wifi_connected ? "CONNECTED" : "disconnected",
+                 input->touch_active ? "ACTIVE" : "inactive");
+
+        /* ── Calculated Variables ── */
+        ESP_LOGI(MAP_TAG, "--- CALCULATED ---");
+        ESP_LOGI(MAP_TAG, "accel_magnitude: %.2f g", input->accel_magnitude);
+        ESP_LOGI(MAP_TAG, "is_low_battery: %s (<%20%%)", input->is_low_battery ? "YES" : "no");
+        ESP_LOGI(MAP_TAG, "is_critical_battery: %s (<%5%%)", input->is_critical_battery ? "YES" : "no");
+        ESP_LOGI(MAP_TAG, "is_moving: %s (mag>0.3g)", input->is_moving ? "YES" : "no");
+        ESP_LOGI(MAP_TAG, "is_shaking: %s (mag>2.0g)", input->is_shaking ? "YES" : "no");
+        ESP_LOGI(MAP_TAG, "is_night: %s (22-6)", input->is_night ? "YES" : "no");
+        ESP_LOGI(MAP_TAG, "is_weekend: %s", input->is_weekend ? "YES" : "no");
+
+        ESP_LOGI(MAP_TAG, "--- DECISION LOGIC ---");
+    }
+
+    /* Priority order: most urgent conditions first */
+
+    /* Shaking device -> PANIC */
+    if (input->is_shaking) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=TRUE -> PANIC+VIBRATE");
+        *out_state = MOCHI_STATE_PANIC;
+        *out_activity = MOCHI_ACTIVITY_VIBRATE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=false, continue...");
+
+    /* Critical battery -> WORRIED */
+    if (input->is_critical_battery) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=TRUE -> WORRIED+IDLE");
+        *out_state = MOCHI_STATE_WORRIED;
+        *out_activity = MOCHI_ACTIVITY_IDLE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=false, continue...");
+
+    /* Night time -> SLEEPY */
+    if (input->is_night) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_night=TRUE -> SLEEPY+SNORE");
+        *out_state = MOCHI_STATE_SLEEPY;
+        *out_activity = MOCHI_ACTIVITY_SNORE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_night=false, continue...");
+
+    /* Moving around -> EXCITED */
+    if (input->is_moving) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=TRUE -> EXCITED+BOUNCE");
+        *out_state = MOCHI_STATE_EXCITED;
+        *out_activity = MOCHI_ACTIVITY_BOUNCE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=false, continue...");
+
+    /* Low battery (but not critical) -> COOL (taking it easy) */
+    if (input->is_low_battery) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=TRUE -> COOL+IDLE");
+        *out_state = MOCHI_STATE_COOL;
+        *out_activity = MOCHI_ACTIVITY_IDLE;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=false, continue...");
+
+    /* Default: Check for API result or request async query */
+    if (input->wifi_connected) {
+        /* First check if we have a pending API result (non-blocking) */
+        if (mochi_input_get_api_result(out_state, out_activity)) {
+            if (verbose) ESP_LOGI(MAP_TAG, ">>> ASYNC API RESULT: %s + %s",
+                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+            return;  /* API decided */
+        }
+
+        /* No result yet - request a query (non-blocking, runs in background task) */
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: wifi_connected=TRUE, requesting async API...");
+        mochi_input_request_api_query(input);
+    } else {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: wifi_connected=false, skipping API");
+    }
+
+    /* Fallback: HAPPY (while waiting for API or if offline) */
+    if (verbose) ESP_LOGI(MAP_TAG, "FALLBACK: No conditions met -> HAPPY+IDLE");
+    *out_state = MOCHI_STATE_HAPPY;
+    *out_activity = MOCHI_ACTIVITY_IDLE;
+    if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                          mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+}
+
+/*===========================================================================
+ * State Label Display
+ *===========================================================================*/
+
 static lv_obj_t *s_state_label = NULL;
 
 static void update_state_label(void) {
     if (s_state_label == NULL) return;
 
-    lv_label_set_text(s_state_label, mochi_state_name((mochi_state_t)s_current_state));
+    /* Get current state and activity from mochi system */
+    mochi_state_t state = mochi_get_state();
+    mochi_activity_t activity = mochi_get_activity();
+
+    /* Format: "STATE + ACTIVITY" */
+    static char label_buf[64];
+    snprintf(label_buf, sizeof(label_buf), "%s + %s",
+             mochi_state_name(state), mochi_activity_name(activity));
+    lv_label_set_text(s_state_label, label_buf);
 }
 
-static void cycle_to_next_state(void) {
-    s_current_state = (s_current_state + 1) % MOCHI_STATE_MAX;
-    ESP_BROOKESIA_LOGI("Mochi: %s", mochi_state_name((mochi_state_t)s_current_state));
-    update_state_label();
-    mochi_set((mochi_state_t)s_current_state, MOCHI_ACTIVITY_IDLE);
-}
-
-static void cycle_to_prev_state(void) {
-    s_current_state = (s_current_state + MOCHI_STATE_MAX - 1) % MOCHI_STATE_MAX;
-    ESP_BROOKESIA_LOGI("Mochi: %s", mochi_state_name((mochi_state_t)s_current_state));
-    update_state_label();
-    mochi_set((mochi_state_t)s_current_state, MOCHI_ACTIVITY_IDLE);
-}
-
-static void on_screen_click(lv_event_t *e) {
-    /* Single click - go to next state */
-    cycle_to_next_state();
-}
-
-static void on_screen_gesture(lv_event_t *e) {
-    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
-
-    if (dir == LV_DIR_BOTTOM) {
-        /* Swipe down - go to next state */
-        cycle_to_next_state();
-    } else if (dir == LV_DIR_TOP) {
-        /* Swipe up - go to previous state */
-        cycle_to_prev_state();
-    }
-    /* Ignore left/right swipes */
+/**
+ * @brief Timer callback to update input state
+ *
+ * Called periodically to collect inputs and run the mapper.
+ * Updates at 10Hz (100ms) for responsive state changes.
+ */
+static void input_timer_cb(lv_timer_t *t)
+{
+    mochi_input_update();
+    update_state_label();  /* Update label after state change */
 }
 
 /*===========================================================================
@@ -121,10 +293,6 @@ bool PhoneMiBuddyConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
 
-    /* Reset state and activity index */
-    s_current_state = 0;
-    s_current_activity = 0;
-
     /* Initialize audio system before mochi (which may play sounds) */
     Audio_Play_Init();
 
@@ -150,14 +318,22 @@ bool PhoneMiBuddyConf::run(void)
     /* Start with first state (Happy + Idle) */
     mochi_set(MOCHI_STATE_HAPPY, MOCHI_ACTIVITY_IDLE);
 
-    ESP_BROOKESIA_LOGI("Mochi: %s - TAP or SWIPE to change state",
-                       mochi_state_name((mochi_state_t)s_current_state));
+    /* Initialize input system with default mapper */
+    mochi_input_init();
+    mochi_input_set_mapper_fn(default_input_mapper);
 
-    /* Add touch handlers to cycle through states */
-    lv_obj_t *screen = lv_screen_active();
-    lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(screen, on_screen_click, LV_EVENT_SHORT_CLICKED, NULL);
-    lv_obj_add_event_cb(screen, on_screen_gesture, LV_EVENT_GESTURE, NULL);
+    /* Set API URL for remote decisions (from Kconfig) */
+#ifdef CONFIG_MIBUDDY_API_URL
+    mochi_input_set_api_url(CONFIG_MIBUDDY_API_URL);
+#else
+    mochi_input_set_api_url("http://10.0.13.101:8080/mochi/state");
+#endif
+
+    /* Start timer for input updates */
+    s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
+
+    ESP_LOGI("MiBuddy", "Input mapper started: interval=%lums (%.1f Hz), API fallback when idle",
+             (unsigned long)s_input_timer_interval_ms, 1000.0f / s_input_timer_interval_ms);
 
 #if 0  /* Temporarily disabled */
     /* Create the slideshow UI (shows embedded images, then SD card PNGs) */
@@ -177,6 +353,15 @@ bool PhoneMiBuddyConf::run(void)
 bool PhoneMiBuddyConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
+
+    /* Stop input timer */
+    if (s_input_timer) {
+        lv_timer_delete(s_input_timer);
+        s_input_timer = NULL;
+    }
+
+    /* Cleanup input system */
+    mochi_input_deinit();
 
     /* Reset label pointer (LVGL will delete it with screen) */
     s_state_label = NULL;
@@ -200,6 +385,15 @@ bool PhoneMiBuddyConf::back(void)
 bool PhoneMiBuddyConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
+
+    /* Stop input timer */
+    if (s_input_timer) {
+        lv_timer_delete(s_input_timer);
+        s_input_timer = NULL;
+    }
+
+    /* Cleanup input system */
+    mochi_input_deinit();
 
     /* Reset label pointer (LVGL will delete it with screen) */
     s_state_label = NULL;

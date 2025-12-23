@@ -1,0 +1,25 @@
+menu "MiBuddy Configuration"
+
+    config MIBUDDY_INPUT_INTERVAL_MS
+        int "Input mapper interval (ms)"
+        default 100
+        range 50 5000
+        help
+            How often the input system collects sensor data and runs the mapper.
+            Lower values = more responsive but higher CPU usage.
+
+            Common values:
+            - 50ms (20Hz) - Very responsive, high CPU
+            - 100ms (10Hz) - Default, good balance
+            - 500ms (2Hz) - Low power mode
+            - 1000ms (1Hz) - Very low power
+
+    config MIBUDDY_API_URL
+        string "API endpoint URL"
+        default "http://10.0.13.101:8080/mochi/state"
+        help
+            HTTP endpoint for remote state decisions.
+            The mochi will POST sensor data and receive state/activity response.
+            Set to empty string to disable API queries.
+
+endmenu

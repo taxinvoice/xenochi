@@ -86,7 +86,7 @@ int wifi_manager_get_rssi(void);
 /**
  * @brief Get current IP address as string
  *
- * @param ip_buf Buffer to store the IP string (e.g., "192.168.1.100")
+ * @param ip_buf Buffer to store the IP string (e.g., "10.0.13.101")
  * @param buf_len Size of the buffer (recommend at least 16 bytes)
  *
  * @note Returns "0.0.0.0" if not connected

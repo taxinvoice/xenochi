@@ -172,8 +172,8 @@ esp_err_t qmi8658_disable_wake_on_motion(qmi8658_dev_t *dev);
 esp_err_t qmi8658_write_register(qmi8658_dev_t *dev, uint8_t reg, uint8_t value);
 esp_err_t qmi8658_read_register(qmi8658_dev_t *dev, uint8_t reg, uint8_t *buffer, uint8_t length);
 
-#endif // QMI8658_H
-
 #ifdef __cplusplus
 }
 #endif
+
+#endif // QMI8658_H
