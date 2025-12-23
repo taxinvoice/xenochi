@@ -228,39 +228,20 @@ static void close_log_file(void)
 }
 
 /**
- * @brief Rotate log files (system.log -> system.log.1 -> system.log.2 ...)
+ * @brief Rotate log files - delete current and start fresh
  */
 static void rotate_log_files(void)
 {
     close_log_file();
 
-    char old_path[140];
-    char new_path[140];
-
-    /* Delete oldest file if at max */
-    snprintf(old_path, sizeof(old_path), "%s/system.log.%d",
-             s_config.log_dir, s_config.max_files);
-    if (sd_file_exists(old_path)) {
-        sd_file_delete(old_path);
+    /* Simply delete the current log file and start fresh */
+    char path[140];
+    snprintf(path, sizeof(path), "%s/system.log", s_config.log_dir);
+    if (sd_file_exists(path)) {
+        sd_file_delete(path);
     }
 
-    /* Shift all files up by 1 */
-    for (int i = s_config.max_files - 1; i >= 1; i--) {
-        snprintf(old_path, sizeof(old_path), "%s/system.log.%d", s_config.log_dir, i);
-        snprintf(new_path, sizeof(new_path), "%s/system.log.%d", s_config.log_dir, i + 1);
-        if (sd_file_exists(old_path)) {
-            sd_file_rename(old_path, new_path);
-        }
-    }
-
-    /* Rename current log to .1 */
-    snprintf(old_path, sizeof(old_path), "%s/system.log", s_config.log_dir);
-    snprintf(new_path, sizeof(new_path), "%s/system.log.1", s_config.log_dir);
-    if (sd_file_exists(old_path)) {
-        sd_file_rename(old_path, new_path);
-    }
-
-    ESP_LOGI(TAG, "Log files rotated");
+    ESP_LOGI(TAG, "Log file rotated (new file created)");
 }
 
 esp_err_t sd_logger_init(void)
@@ -347,48 +328,17 @@ const char* sd_logger_get_current_file(void)
 
 uint32_t sd_logger_get_total_size_kb(void)
 {
-    uint32_t total_bytes = 0;
-
-    /* Check main log file */
     char path[140];
     snprintf(path, sizeof(path), "%s/system.log", s_config.log_dir);
     int32_t size = sd_file_size(path);
-    if (size > 0) {
-        total_bytes += size;
-    }
-
-    /* Check rotated files */
-    for (int i = 1; i <= s_config.max_files; i++) {
-        snprintf(path, sizeof(path), "%s/system.log.%d", s_config.log_dir, i);
-        size = sd_file_size(path);
-        if (size > 0) {
-            total_bytes += size;
-        }
-    }
-
-    return total_bytes / 1024;
+    return (size > 0) ? (size / 1024) : 0;
 }
 
 uint8_t sd_logger_get_file_count(void)
 {
-    uint8_t count = 0;
-
-    /* Check main log file */
     char path[140];
     snprintf(path, sizeof(path), "%s/system.log", s_config.log_dir);
-    if (sd_file_exists(path)) {
-        count++;
-    }
-
-    /* Check rotated files */
-    for (int i = 1; i <= s_config.max_files; i++) {
-        snprintf(path, sizeof(path), "%s/system.log.%d", s_config.log_dir, i);
-        if (sd_file_exists(path)) {
-            count++;
-        }
-    }
-
-    return count;
+    return sd_file_exists(path) ? 1 : 0;
 }
 
 esp_err_t sd_logger_clear_all(void)
@@ -404,16 +354,10 @@ esp_err_t sd_logger_clear_all(void)
     /* Close current file first */
     close_log_file();
 
-    /* Delete main log file */
+    /* Delete log file */
     char path[140];
     snprintf(path, sizeof(path), "%s/system.log", s_config.log_dir);
     sd_file_delete(path);
-
-    /* Delete rotated files */
-    for (int i = 1; i <= s_config.max_files; i++) {
-        snprintf(path, sizeof(path), "%s/system.log.%d", s_config.log_dir, i);
-        sd_file_delete(path);
-    }
 
     /* Reopen log file if enabled */
     if (s_config.enabled) {
@@ -422,7 +366,7 @@ esp_err_t sd_logger_clear_all(void)
 
     give_mutex();
 
-    ESP_LOGI(TAG, "All log files cleared");
+    ESP_LOGI(TAG, "Log file cleared");
     return ESP_OK;
 }
 

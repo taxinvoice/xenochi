@@ -45,6 +45,7 @@ using namespace esp_brookesia::gui;
  *===========================================================================*/
 
 static lv_style_t style_text_muted;         /**< Muted text style */
+static lv_style_t style_textarea_placeholder; /**< Dark placeholder text style */
 
 /* Main panel elements */
 static lv_obj_t * SD_Size;                  /**< SD card size text area */
@@ -488,6 +489,10 @@ bool PhoneSettingConf::run(void)
     lv_style_init(&style_text_muted);
     lv_style_set_text_opa(&style_text_muted, LV_OPA_90);
 
+    /* Initialize dark placeholder text style for textareas */
+    lv_style_init(&style_textarea_placeholder);
+    lv_style_set_text_color(&style_textarea_placeholder, lv_color_hex(0x333333));
+
     lv_obj_t * panel1 = lv_obj_create(lv_screen_active());
     lv_obj_set_height(panel1, LV_SIZE_CONTENT);
     lv_obj_t * panel1_title = lv_label_create(panel1);
@@ -498,6 +503,7 @@ bool PhoneSettingConf::run(void)
     SD_Size = lv_textarea_create(panel1);
     lv_textarea_set_one_line(SD_Size, true);
     lv_textarea_set_placeholder_text(SD_Size, "SD Size");
+    lv_obj_add_style(SD_Size, &style_textarea_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
     uint32_t sd_size = get_sdcard_total_size();
     if(sd_size == 0)
     {
@@ -516,6 +522,7 @@ bool PhoneSettingConf::run(void)
     FlashSize = lv_textarea_create(panel1);
     lv_textarea_set_one_line(FlashSize, true);
     lv_textarea_set_placeholder_text(FlashSize, "Flash Size");
+    lv_obj_add_style(FlashSize, &style_textarea_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
     uint32_t flash_size = Flash_Searching();
     if(flash_size == 0)
     {
@@ -536,6 +543,7 @@ bool PhoneSettingConf::run(void)
     RTC_Time = lv_textarea_create(panel1);
     lv_textarea_set_one_line(RTC_Time, true);
     lv_textarea_set_placeholder_text(RTC_Time, "Display time");
+    lv_obj_add_style(RTC_Time, &style_textarea_placeholder, LV_PART_TEXTAREA_PLACEHOLDER);
 
     /* NTP Sync button - enabled only when WiFi is connected */
     but_ntp_sync = lv_button_create(panel1);

@@ -2,8 +2,9 @@
  * @file lvgl_mibuddy.c
  * @brief MiBuddy slideshow implementation
  *
- * Displays PNG images from /sdcard/Images/ folder in a continuous
+ * Displays images from /sdcard/Images/ folder in a continuous
  * slideshow loop with 2-second intervals between images.
+ * Supported formats: PNG only (max 240x284 recommended)
  */
 
 #include "lvgl_mibuddy.h"
@@ -14,18 +15,23 @@
 
 static const char *TAG = "mibuddy";
 
+/* Declare the embedded wallpaper image for testing */
+LV_IMAGE_DECLARE(esp_brookesia_image_small_wallpaper_dark_240_240);
+
+/* Flag to show embedded test image first */
+static bool s_show_embedded_first = true;
+
 /* Maximum number of images to scan */
 #define MAX_IMAGES 50
 
 /* Slideshow interval in milliseconds */
 #define SLIDESHOW_INTERVAL_MS 2000
 
-/* Image directory on SD card */
+/* Image directory on SD card (POSIX path for file scanning) */
 #define IMAGES_DIR "/sdcard/Images"
 
-/* LVGL file path prefix for SD card
- * LVGL uses drive letter format - check if configured for 'S' or use default */
-#define LVGL_SDCARD_PREFIX "S:"
+/* LVGL filesystem path prefix (S: maps to /sdcard via LV_FS_POSIX_PATH) */
+#define LVGL_IMAGES_DIR "S:Images"
 
 /*===========================================================================
  * Static Variables
@@ -70,11 +76,19 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
 {
     ESP_LOGI(TAG, "Creating MiBuddy slideshow UI");
 
+    /* Cleanup any existing timer first (prevents multiple timers if reopened without cleanup) */
+    if (s_slideshow_timer != NULL) {
+        ESP_LOGW(TAG, "Deleting orphaned slideshow timer");
+        lv_timer_delete(s_slideshow_timer);
+        s_slideshow_timer = NULL;
+    }
+
     /* Reset state */
     s_current_index = 0;
     s_image_count = 0;
+    s_show_embedded_first = true;
 
-    /* Scan SD card for PNG images */
+    /* Scan SD card for image files (PNG, JPG, BMP, GIF) */
     scan_images();
 
     /* Create container for the slideshow */
@@ -89,7 +103,7 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
     if (s_image_count == 0) {
         /* No images found - show info message */
         s_info_label = lv_label_create(container);
-        lv_label_set_text(s_info_label, "No images found!\n\nPlace PNG files in:\n/sdcard/Images/");
+        lv_label_set_text(s_info_label, "No images found!\n\nPlace PNG files in:\n/sdcard/Images/\n\n(max 240x284)");
         lv_obj_set_style_text_color(s_info_label, lv_color_white(), 0);
         lv_obj_set_style_text_align(s_info_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(s_info_label);
@@ -136,6 +150,7 @@ void lvgl_mibuddy_cleanup(void)
     s_img_obj = NULL;
     s_info_label = NULL;
     s_current_index = 0;
+    s_show_embedded_first = true;  /* Reset to show embedded image first on next open */
 }
 
 /*===========================================================================
@@ -149,18 +164,30 @@ static void scan_images(void)
 {
     ESP_LOGI(TAG, "Scanning for images in %s", IMAGES_DIR);
 
-    /* Use the BSP folder retrieval function to find PNG files */
-    s_image_count = Folder_retrieval(
-        IMAGES_DIR,
-        ".png",
-        s_image_names,
-        MAX_IMAGES
-    );
+    /* Only PNG supported */
+    static const char *extensions[] = {".png"};
+    static const int num_extensions = sizeof(extensions) / sizeof(extensions[0]);
+
+    s_image_count = 0;
+
+    /* Scan for each supported image format */
+    for (int i = 0; i < num_extensions && s_image_count < MAX_IMAGES; i++) {
+        uint16_t found = Folder_retrieval(
+            IMAGES_DIR,
+            extensions[i],
+            &s_image_names[s_image_count],  /* Append to existing list */
+            MAX_IMAGES - s_image_count       /* Remaining slots */
+        );
+        if (found > 0) {
+            ESP_LOGI(TAG, "Found %d %s files", found, extensions[i]);
+            s_image_count += found;
+        }
+    }
 
     if (s_image_count == 0) {
-        ESP_LOGW(TAG, "No PNG files found in %s", IMAGES_DIR);
+        ESP_LOGW(TAG, "No image files found in %s", IMAGES_DIR);
     } else {
-        ESP_LOGI(TAG, "Found %d PNG files", s_image_count);
+        ESP_LOGI(TAG, "Found %d total images", s_image_count);
         for (int i = 0; i < s_image_count && i < 5; i++) {
             ESP_LOGI(TAG, "  [%d] %s", i, s_image_names[i]);
         }
@@ -175,23 +202,60 @@ static void scan_images(void)
  */
 static void display_current_image(void)
 {
-    if (s_img_obj == NULL || s_image_count == 0) {
+    if (s_img_obj == NULL) {
+        ESP_LOGW(TAG, "display_current_image: img_obj is NULL");
+        return;
+    }
+
+    /* Show embedded test image first to verify display works */
+    if (s_show_embedded_first) {
+        ESP_LOGI(TAG, "Displaying embedded wallpaper (240x240) as test");
+        lv_image_set_src(s_img_obj, &esp_brookesia_image_small_wallpaper_dark_240_240);
+        s_show_embedded_first = false;  /* Only show once */
+        return;
+    }
+
+    /* No SD card images available */
+    if (s_image_count == 0) {
+        ESP_LOGW(TAG, "No SD card images to display");
         return;
     }
 
     /* Build full path to the image file
-     * LVGL expects paths in format: "S:/sdcard/Images/filename.png"
-     * The "S:" prefix tells LVGL to use the STDIO file driver
+     * LVGL expects paths in format: "S:Images/filename.png"
+     * where S: maps to /sdcard via LV_FS_POSIX_PATH config
      */
     static char img_path[MAX_PATH_SIZE + 8];
-    snprintf(img_path, sizeof(img_path), "%s%s/%s",
-             LVGL_SDCARD_PREFIX, IMAGES_DIR, s_image_names[s_current_index]);
+    snprintf(img_path, sizeof(img_path), "%s/%s",
+             LVGL_IMAGES_DIR, s_image_names[s_current_index]);
 
     ESP_LOGI(TAG, "Displaying image [%d/%d]: %s",
              s_current_index + 1, s_image_count, img_path);
 
+    /* Test: verify LVGL filesystem can open the file */
+    lv_fs_file_t f;
+    lv_fs_res_t res = lv_fs_open(&f, img_path, LV_FS_MODE_RD);
+    if (res != LV_FS_RES_OK) {
+        ESP_LOGE(TAG, "LVGL fs_open failed: %s (error=%d)", img_path, res);
+    } else {
+        uint32_t size = 0;
+        lv_fs_seek(&f, 0, LV_FS_SEEK_END);
+        lv_fs_tell(&f, &size);
+        ESP_LOGI(TAG, "LVGL fs_open OK: %s (size=%lu)", img_path, (unsigned long)size);
+        lv_fs_close(&f);
+    }
+
     /* Set the image source to the file path */
     lv_image_set_src(s_img_obj, img_path);
+
+    /* Check if the image loaded correctly by checking dimensions */
+    lv_image_header_t header;
+    lv_result_t img_res = lv_image_decoder_get_info(img_path, &header);
+    if (img_res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to load image: %s (decoder error)", img_path);
+    } else {
+        ESP_LOGI(TAG, "Image loaded: %dx%d, cf=%d", header.w, header.h, header.cf);
+    }
 }
 
 /**
@@ -201,7 +265,15 @@ static void display_current_image(void)
  */
 static void slideshow_timer_cb(lv_timer_t *timer)
 {
-    (void)timer;  /* Unused */
+    /* Safety check: if image object was destroyed, stop the timer */
+    if (s_img_obj == NULL) {
+        ESP_LOGW(TAG, "Timer callback: img_obj is NULL, deleting orphaned timer");
+        if (timer != NULL) {
+            lv_timer_delete(timer);
+        }
+        s_slideshow_timer = NULL;
+        return;
+    }
 
     if (s_image_count == 0) {
         return;

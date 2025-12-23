@@ -13,7 +13,7 @@
  * - Bit depth: 32-bit
  * - Channels: Stereo (2)
  * - Duration: 5 seconds
- * - Output: /sdcard/RECORD.WAV
+ * - Output: /sdcard/Recordings/RECORD.WAV
  *
  * The recording runs in a separate FreeRTOS task to avoid blocking the UI.
  */
@@ -28,6 +28,7 @@
 #include "app_rec.h"
 #include "bsp_board.h"
 #include "audio_driver.h"
+#include <sys/stat.h>
 
 static const char *TAG = "app_rec";
 
@@ -45,7 +46,8 @@ static const char *TAG = "app_rec";
 /* SD card and recording output configuration */
 #define EXAMPLE_RECORD_TIME_SEC    (5)              /**< Recording duration in seconds */
 #define EXAMPLE_SD_MOUNT_POINT     "/sdcard"        /**< SD card mount point */
-#define EXAMPLE_RECORD_FILE_PATH   "/RECORD.WAV"    /**< Output file path */
+#define EXAMPLE_RECORDINGS_DIR     "/Recordings"    /**< Recordings directory */
+#define EXAMPLE_RECORD_FILE_PATH   "/Recordings/RECORD.WAV"  /**< Output file path */
 
 /*===========================================================================
  * WAV File Format Structures
@@ -182,6 +184,14 @@ static esp_err_t record_wav(i2s_chan_handle_t i2s_rx_chan)
         WAV_HEADER_PCM_DEFAULT(wav_size, EXAMPLE_I2S_SAMPLE_BITS, EXAMPLE_I2S_SAMPLE_RATE, EXAMPLE_I2S_CHAN_NUM);
 
     lvgl_port_lock(0);
+
+    /* Create Recordings directory if it doesn't exist */
+    struct stat st;
+    if (stat(EXAMPLE_SD_MOUNT_POINT EXAMPLE_RECORDINGS_DIR, &st) != 0) {
+        ESP_LOGI(TAG, "Creating directory %s", EXAMPLE_RECORDINGS_DIR);
+        mkdir(EXAMPLE_SD_MOUNT_POINT EXAMPLE_RECORDINGS_DIR, 0755);
+    }
+
     ESP_LOGI(TAG, "Opening file %s", EXAMPLE_RECORD_FILE_PATH);
     FILE *f = fopen(EXAMPLE_SD_MOUNT_POINT EXAMPLE_RECORD_FILE_PATH, "w");
     ESP_RETURN_ON_FALSE(f, ESP_FAIL, TAG, "error while opening wav file");
@@ -218,7 +228,7 @@ static esp_err_t record_wav(i2s_chan_handle_t i2s_rx_chan)
     lvgl_port_lock(0);
     fclose(f);
     lvgl_port_unlock();
-    Audio_Play_Music("file://sdcard/RECORD.WAV");
+    Audio_Play_Music("file:///sdcard/Recordings/RECORD.WAV");
     
     //Audio_Play_Music("file://sdcard/1.wav");
 

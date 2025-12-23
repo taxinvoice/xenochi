@@ -281,14 +281,62 @@ esp_err_t sd_file_rename(const char *old_path, const char *new_path)
         return ESP_FAIL;
     }
 
+    /* Try native rename first */
     int ret = rename(old_path, new_path);
-    give_mutex();
+    if (ret == 0) {
+        give_mutex();
+        ESP_LOGD(TAG, "Renamed %s to %s", old_path, new_path);
+        return ESP_OK;
+    }
 
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Failed to rename %s to %s (errno=%d)", old_path, new_path, errno);
+    /* FAT filesystem rename often fails - fall back to copy and delete */
+    ESP_LOGD(TAG, "rename() failed (errno=%d), using copy fallback", errno);
+
+    /* Delete destination if it exists */
+    unlink(new_path);
+
+    /* Open source file for reading */
+    FILE *src = fopen(old_path, "rb");
+    if (src == NULL) {
+        ESP_LOGE(TAG, "Failed to open source file: %s (errno=%d)", old_path, errno);
+        give_mutex();
         return ESP_FAIL;
     }
 
-    ESP_LOGD(TAG, "Renamed %s to %s", old_path, new_path);
-    return ESP_OK;
+    /* Open destination file for writing */
+    FILE *dst = fopen(new_path, "wb");
+    if (dst == NULL) {
+        ESP_LOGE(TAG, "Failed to open destination file: %s (errno=%d)", new_path, errno);
+        fclose(src);
+        give_mutex();
+        return ESP_FAIL;
+    }
+
+    /* Copy in chunks */
+    static char copy_buf[512];
+    size_t bytes_read;
+    esp_err_t result = ESP_OK;
+
+    while ((bytes_read = fread(copy_buf, 1, sizeof(copy_buf), src)) > 0) {
+        if (fwrite(copy_buf, 1, bytes_read, dst) != bytes_read) {
+            ESP_LOGE(TAG, "Write error during copy");
+            result = ESP_FAIL;
+            break;
+        }
+    }
+
+    fclose(src);
+    fclose(dst);
+
+    if (result == ESP_OK) {
+        /* Delete original file */
+        unlink(old_path);
+        ESP_LOGD(TAG, "Renamed %s to %s (via copy)", old_path, new_path);
+    } else {
+        /* Clean up failed copy */
+        unlink(new_path);
+    }
+
+    give_mutex();
+    return result;
 }

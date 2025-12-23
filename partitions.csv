@@ -1,4 +1,6 @@
 # Name,     Type, SubType, Offset,   Size, Flags
-# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap,,,,
+# 16MB Flash layout for ESP32-C6-Touch-LCD-1.83
+# No OTA - flash via USB. No SPIFFS - using SD card for storage.
 nvs,        data,   nvs,      0x9000,       0x6000,
-factory,    0,      0,        0x10000,      4M,
+phy_init,   data,   phy,      0xf000,       0x1000,
+factory,    app,    factory,  0x10000,      15M,

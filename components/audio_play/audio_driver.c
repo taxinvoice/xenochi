@@ -32,6 +32,7 @@ static const char *TAG = "audio play";
 static uint8_t Volume = PLAYER_VOLUME;      /**< Current volume level (0-100) */
 static esp_asp_handle_t handle = NULL;       /**< Audio Simple Player handle */
 static TaskHandle_t xHandle;                 /**< Player task handle */
+static FILE *audio_file = NULL;              /**< Current audio file handle for SPI-safe reading */
 
 /**
  * @brief Player command types
@@ -102,19 +103,49 @@ void player_task(void *pvParameters)
         if (xQueueReceive(cmd_queue, &msg, portMAX_DELAY)) {
             switch (msg.cmd) {
 
-                case CMD_PLAY:
+                case CMD_PLAY: {
                     /* Start playing a new file */
                     printf("Command received: Play <%s>\n", msg.url);
                     Audio_PA_DIS();                              /* Disable amp during transition */
                     esp_audio_simple_player_stop(handle);        /* Stop any current playback */
-                    esp_audio_simple_player_run(handle, msg.url, NULL);  /* Start new file */
+
+                    /* Close previous file if still open */
+                    if (audio_file != NULL) {
+                        fclose(audio_file);
+                        audio_file = NULL;
+                    }
+
+                    /* Convert file:// URL to filesystem path and open file ourselves
+                     * for SPI-synchronized reading (LCD and SD share SPI2 bus) */
+                    const char *file_path = msg.url;
+                    if (strncmp(file_path, "file://", 7) == 0) {
+                        file_path = msg.url + 7;  /* Skip "file://" prefix -> "/sdcard/..." */
+                    }
+
+                    lvgl_port_lock(0);  /* Lock during file open (uses SD SPI) */
+                    audio_file = fopen(file_path, "rb");
+                    lvgl_port_unlock();
+
+                    if (audio_file == NULL) {
+                        printf("Failed to open audio file: %s\n", file_path);
+                        break;
+                    }
+
+                    /* URL still needed for decoder type detection (MP3/WAV based on extension) */
+                    esp_audio_simple_player_run(handle, msg.url, NULL);
                     Audio_PA_EN();                               /* Enable amp for playback */
                     break;
+                }
 
                 case CMD_STOP:
                     /* Stop playback completely */
                     printf("Command received: Stop\n");
                     esp_audio_simple_player_stop(handle);
+                    /* Close audio file */
+                    if (audio_file != NULL) {
+                        fclose(audio_file);
+                        audio_file = NULL;
+                    }
                     Audio_PA_DIS();  /* Disable amp to save power */
                     break;
 
@@ -136,6 +167,11 @@ void player_task(void *pvParameters)
                     /* Cleanup and exit task */
                     gpio_set_level(GPIO_NUM_0, 0);
                     ESP_ERROR_CHECK(gpio_reset_pin(GPIO_NUM_0));
+                    /* Close audio file if open */
+                    if (audio_file != NULL) {
+                        fclose(audio_file);
+                        audio_file = NULL;
+                    }
                     esp_audio_simple_player_destroy(handle);
                     vQueueDelete(cmd_queue);
                     cmd_queue = NULL;
@@ -195,15 +231,22 @@ static int out_data_callback(uint8_t *data, int data_size, void *ctx)
  * @brief Input data callback for audio pipeline (file reading)
  *
  * Called by ESP Audio Simple Player to read audio data from file.
+ * Uses LVGL port lock to synchronize with LCD SPI operations since
+ * both LCD and SD card share the same SPI2 bus.
  *
  * @param data Buffer to fill with audio data
  * @param data_size Number of bytes to read
- * @param ctx File pointer (FILE*)
- * @return Number of bytes read
+ * @param ctx Unused (we use static audio_file)
+ * @return Number of bytes read, 0 on EOF or error
  */
 static int in_data_callback(uint8_t *data, int data_size, void *ctx)
 {
-    int ret = fread(data, 1, data_size, ctx);
+    if (audio_file == NULL) {
+        return 0;  /* No file open */
+    }
+    lvgl_port_lock(0);  /* Acquire LVGL mutex to prevent SPI bus conflict with LCD */
+    int ret = fread(data, 1, data_size, audio_file);
+    lvgl_port_unlock();
     ESP_LOGD(TAG, "%s-%d,rd size:%d", __func__, __LINE__, ret);
     return ret;
 }
@@ -236,8 +279,12 @@ static int mock_event_callback(esp_asp_event_pkt_t *event, void *ctx)
         ESP_LOGI(TAG, "Get State, %d,%s", st, esp_audio_simple_player_state_to_str(st));
 
         if (st == ESP_ASP_STATE_FINISHED) {
-            /* Playback completed - disable amplifier */
+            /* Playback completed - close file and disable amplifier */
             ESP_LOGI(TAG, "Playback finished");
+            if (audio_file != NULL) {
+                fclose(audio_file);
+                audio_file = NULL;
+            }
             Audio_PA_DIS();
         }
     }
@@ -258,9 +305,11 @@ static void pipeline_init(void)
 {
     esp_log_level_set("*", ESP_LOG_INFO);
 
-    /* Configure audio pipeline with output callback */
+    /* Configure audio pipeline with custom input callback for SPI-safe file reading.
+     * Both LCD and SD card share SPI2 bus, so we handle file reading ourselves
+     * with proper LVGL mutex synchronization to prevent bus conflicts. */
     esp_asp_cfg_t cfg = {
-        .in.cb = NULL,              /* Input from URL (file:// or http://) */
+        .in.cb = in_data_callback,   /* Custom file reader with SPI synchronization */
         .in.user_ctx = NULL,
         .out.cb = out_data_callback, /* Output to I2S via BSP */
         .out.user_ctx = NULL,

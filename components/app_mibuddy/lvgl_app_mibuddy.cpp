@@ -84,6 +84,9 @@ bool PhoneMiBuddyConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
 
+    /* Stop slideshow before closing */
+    lvgl_mibuddy_cleanup();
+
     /* Notify core to close the app */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
 
