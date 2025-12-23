@@ -499,3 +499,106 @@ uint8_t get_audio_volume(void)
 {
     return Volume;
 }
+
+/*===========================================================================
+ * Embedded PCM Playback
+ *===========================================================================*/
+
+/** Target sample rate for codec */
+#define TARGET_SAMPLE_RATE  44100
+
+/** Chunk size for PCM output (in samples) */
+#define PCM_CHUNK_SAMPLES   512
+
+/**
+ * @brief Play embedded PCM audio data directly
+ *
+ * Plays raw PCM samples from memory with sample rate conversion.
+ * This function is synchronous - it blocks until playback is complete.
+ *
+ * @param pcm_data Pointer to 16-bit PCM sample array
+ * @param samples Number of samples
+ * @param sample_rate Source sample rate in Hz
+ * @param channels Number of channels (1=mono, 2=stereo)
+ * @param loop If true, loop continuously (NOT YET IMPLEMENTED)
+ * @return ESP_GMF_ERR_OK on success
+ */
+esp_gmf_err_t Audio_Play_PCM(const int16_t *pcm_data, size_t samples,
+                              uint32_t sample_rate, uint8_t channels, bool loop)
+{
+    if (!pcm_data || samples == 0) {
+        ESP_LOGE(TAG, "Invalid PCM data");
+        return ESP_GMF_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Playing embedded PCM: %zu samples @ %lu Hz, %d ch",
+             samples, (unsigned long)sample_rate, channels);
+
+    /* Enable power amplifier */
+    Audio_PA_EN();
+
+    /* Calculate resampling ratio */
+    float ratio = (float)TARGET_SAMPLE_RATE / (float)sample_rate;
+    size_t output_samples = (size_t)(samples * ratio);
+
+    /* Allocate output buffer for stereo samples */
+    int16_t *out_buf = malloc(PCM_CHUNK_SAMPLES * 2 * sizeof(int16_t));
+    if (!out_buf) {
+        ESP_LOGE(TAG, "Failed to allocate PCM buffer");
+        Audio_PA_DIS();
+        return ESP_GMF_ERR_MEMORY_LACK;
+    }
+
+    /* Process in chunks with linear interpolation resampling */
+    size_t out_idx = 0;
+    while (out_idx < output_samples) {
+        size_t chunk_size = PCM_CHUNK_SAMPLES;
+        if (out_idx + chunk_size > output_samples) {
+            chunk_size = output_samples - out_idx;
+        }
+
+        /* Fill output buffer with resampled stereo data */
+        for (size_t i = 0; i < chunk_size; i++) {
+            /* Calculate source sample position (fractional) */
+            float src_pos = (float)(out_idx + i) / ratio;
+            size_t src_idx = (size_t)src_pos;
+            float frac = src_pos - (float)src_idx;
+
+            /* Clamp to valid range */
+            if (src_idx >= samples - 1) {
+                src_idx = samples - 2;
+                frac = 1.0f;
+            }
+
+            /* Linear interpolation */
+            int16_t sample;
+            if (channels == 1) {
+                /* Mono input */
+                int32_t s0 = pcm_data[src_idx];
+                int32_t s1 = pcm_data[src_idx + 1];
+                sample = (int16_t)(s0 + (int32_t)(frac * (float)(s1 - s0)));
+            } else {
+                /* Stereo input - just use left channel for now */
+                int32_t s0 = pcm_data[src_idx * 2];
+                int32_t s1 = pcm_data[(src_idx + 1) * 2];
+                sample = (int16_t)(s0 + (int32_t)(frac * (float)(s1 - s0)));
+            }
+
+            /* Output as stereo (duplicate to both channels) */
+            out_buf[i * 2] = sample;      /* Left */
+            out_buf[i * 2 + 1] = sample;  /* Right */
+        }
+
+        /* Send to codec */
+        esp_audio_play(out_buf, chunk_size * 2 * sizeof(int16_t), 100 / portTICK_PERIOD_MS);
+        out_idx += chunk_size;
+    }
+
+    free(out_buf);
+
+    /* Disable power amplifier after playback */
+    Audio_PA_DIS();
+
+    ESP_LOGI(TAG, "Embedded PCM playback complete");
+    return ESP_GMF_ERR_OK;
+}

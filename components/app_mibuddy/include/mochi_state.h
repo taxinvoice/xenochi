@@ -135,10 +135,28 @@ typedef struct {
  *===========================================================================*/
 
 /**
+ * @brief Asset setup callback type
+ *
+ * Called after mochi_init() to configure embedded assets for states.
+ */
+typedef void (*mochi_asset_setup_fn)(void);
+
+/**
+ * @brief Register asset setup callback
+ *
+ * Call this BEFORE mochi_init() to register a function that will configure
+ * embedded assets for MochiStates. The callback is invoked during mochi_init().
+ *
+ * @param setup_fn Function to call for asset setup (NULL to clear)
+ */
+void mochi_register_asset_setup(mochi_asset_setup_fn setup_fn);
+
+/**
  * @brief Initialize the mochi state system
  *
  * Must be called before any other mochi_* functions.
  * Initializes internal state and default configurations.
+ * If an asset setup callback was registered, it will be called.
  *
  * @return ESP_OK on success
  */
@@ -315,6 +333,42 @@ void mochi_play_sound(const char *path, bool loop);
  * @brief Stop current sound
  */
 void mochi_stop_sound(void);
+
+/*===========================================================================
+ * Public API - Asset Configuration
+ *===========================================================================*/
+
+/* Forward declaration - full definition in mochi_assets.h */
+struct mochi_state_config_t;
+typedef struct mochi_state_config_t mochi_state_config_t;
+
+/**
+ * @brief Configure assets for a state
+ *
+ * Associates sounds, sprites, and backgrounds with a state.
+ * Assets can be embedded (flash) or on SD card.
+ *
+ * @param state State to configure
+ * @param config Asset configuration (NULL to clear)
+ * @return ESP_OK on success
+ *
+ * @example
+ *   #include "mochi_assets.h"
+ *   mochi_state_config_t cfg = {
+ *       .enter_sound = MOCHI_SOUND_EMBEDDED(beep_pcm, beep_len, 8000),
+ *       .sprite = MOCHI_IMAGE_SD("happy.png"),
+ *   };
+ *   mochi_configure_state(MOCHI_STATE_HAPPY, &cfg);
+ */
+esp_err_t mochi_configure_state(mochi_state_t state, const mochi_state_config_t *config);
+
+/**
+ * @brief Get asset configuration for a state
+ *
+ * @param state State to query
+ * @return Pointer to config (NULL if invalid state)
+ */
+const mochi_state_config_t* mochi_get_state_config(mochi_state_t state);
 
 #ifdef __cplusplus
 }

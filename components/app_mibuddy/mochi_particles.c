@@ -304,6 +304,9 @@ void mochi_particles_create(lv_obj_t *parent) {
     lv_obj_set_size(s_particles.container, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_pos(s_particles.container, 0, 0);
     lv_obj_clear_flag(s_particles.container, LV_OBJ_FLAG_SCROLLABLE);
+    /* Allow click events to pass through to parent */
+    lv_obj_add_flag(s_particles.container, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_clear_flag(s_particles.container, LV_OBJ_FLAG_CLICKABLE);
 
     /* Initialize arrays */
     for (int i = 0; i < 8; i++) {

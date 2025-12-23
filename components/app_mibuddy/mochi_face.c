@@ -12,6 +12,8 @@
 #include "mochi_state.h"
 #include "mochi_theme.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 #include <math.h>
 
 static const char *TAG = "mochi_face";
@@ -23,31 +25,45 @@ static const char *TAG = "mochi_face";
 #define DISPLAY_WIDTH   240
 #define DISPLAY_HEIGHT  284
 
-/* Canvas dimensions - smaller than display to save memory */
-#define CANVAS_WIDTH    200
-#define CANVAS_HEIGHT   200
+/*===========================================================================
+ * Canvas Size Configuration
+ * Change CANVAS_SIZE to adjust face size. All dimensions scale automatically.
+ * Memory usage: CANVAS_SIZE * CANVAS_SIZE * 2 bytes (RGB565)
+ *   80  -> ~12.8KB
+ *   100 -> ~20KB
+ *   120 -> ~28.8KB
+ *   150 -> ~45KB
+ *===========================================================================*/
+#define CANVAS_SIZE     120
+
+/* Canvas dimensions */
+#define CANVAS_WIDTH    CANVAS_SIZE
+#define CANVAS_HEIGHT   CANVAS_SIZE
+
+/* Scale factor: original design was 200x200 */
+#define SCALE(x)        ((x) * CANVAS_SIZE / 200)
 
 /* Face dimensions - relative to canvas center */
 #define FACE_CENTER_X   (CANVAS_WIDTH / 2)
 #define FACE_CENTER_Y   (CANVAS_HEIGHT / 2)
-#define FACE_RADIUS_X   85
-#define FACE_RADIUS_Y   75
+#define FACE_RADIUS_X   SCALE(85)
+#define FACE_RADIUS_Y   SCALE(75)
 
 /* Eye positions (relative to face center) */
-#define LEFT_EYE_X      (-35)
-#define RIGHT_EYE_X     (35)
-#define EYE_Y           (-10)
-#define EYE_WIDTH       22
-#define EYE_HEIGHT      28
+#define LEFT_EYE_X      SCALE(-35)
+#define RIGHT_EYE_X     SCALE(35)
+#define EYE_Y           SCALE(-10)
+#define EYE_WIDTH       SCALE(22)
+#define EYE_HEIGHT      SCALE(28)
 
 /* Mouth position */
-#define MOUTH_Y         40
+#define MOUTH_Y         SCALE(40)
 
 /* Blush position */
-#define BLUSH_X         55
-#define BLUSH_Y         20
-#define BLUSH_RX        18
-#define BLUSH_RY        10
+#define BLUSH_X         SCALE(55)
+#define BLUSH_Y         SCALE(20)
+#define BLUSH_RX        SCALE(18)
+#define BLUSH_RY        SCALE(10)
 
 /*===========================================================================
  * Static Variables
@@ -130,23 +146,20 @@ static void draw_line(lv_layer_t *layer, int x1, int y1, int x2, int y2, lv_colo
  *===========================================================================*/
 
 /**
- * @brief Draw the background
+ * @brief Clear the canvas with white background
  */
 static void draw_background(lv_layer_t *layer, const mochi_theme_t *theme) {
-    /* Main background */
+    (void)theme;  /* Not using theme background */
+
+    /* Fill with white background (RGB565 doesn't support transparency) */
     lv_draw_rect_dsc_t rect_dsc;
     lv_draw_rect_dsc_init(&rect_dsc);
-    rect_dsc.bg_color = theme->bg;
+    rect_dsc.bg_color = lv_color_white();
     rect_dsc.bg_opa = LV_OPA_COVER;
     rect_dsc.radius = 0;
 
     lv_area_t area = {0, 0, CANVAS_WIDTH - 1, CANVAS_HEIGHT - 1};
     lv_draw_rect(layer, &rect_dsc, &area);
-
-    /* Background gradient simulation - lighter ellipse at top */
-    draw_ellipse(layer, FACE_CENTER_X, FACE_CENTER_Y - 30,
-                 CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2,
-                 theme->bg_light, LV_OPA_50);
 }
 
 /**
@@ -266,70 +279,52 @@ static void draw_mouth(lv_layer_t *layer, const mochi_face_params_t *p, const mo
     int cy = FACE_CENTER_Y + (int)p->face_offset_y + MOUTH_Y;
     float open = p->mouth_open;
 
+    int lw = SCALE(15) > 0 ? SCALE(15) : 1;  /* Line width, min 1 */
+
     switch (p->mouth_type) {
         case MOCHI_MOUTH_SMILE:
             /* Curved smile - draw as two lines meeting at center */
-            for (int i = -1; i <= 1; i++) {
-                draw_line(layer, cx - 20, cy + i, cx, cy + (int)(12 * open) + i, theme->mouth, 3);
-                draw_line(layer, cx, cy + (int)(12 * open) + i, cx + 20, cy + i, theme->mouth, 3);
-            }
+            draw_line(layer, cx - SCALE(20), cy, cx, cy + (int)(SCALE(12) * open), theme->mouth, lw);
+            draw_line(layer, cx, cy + (int)(SCALE(12) * open), cx + SCALE(20), cy, theme->mouth, lw);
             break;
 
         case MOCHI_MOUTH_OPEN_SMILE:
             /* Open mouth */
-            draw_ellipse(layer, cx, cy + 5, (int)(18 * open), (int)(15 * open),
+            draw_ellipse(layer, cx, cy + SCALE(5), (int)(SCALE(18) * open), (int)(SCALE(15) * open),
                          theme->mouth, LV_OPA_COVER);
-            /* Tongue */
-            draw_ellipse(layer, cx, cy + 12, (int)(10 * open), (int)(8 * open),
-                         lv_color_make(255, 138, 138), LV_OPA_COVER);
-            /* Teeth hint */
-            if (open > 0.3f) {
-                lv_draw_rect_dsc_t rect_dsc;
-                lv_draw_rect_dsc_init(&rect_dsc);
-                rect_dsc.bg_color = lv_color_white();
-                rect_dsc.bg_opa = (lv_opa_t)(open * 255);
-                rect_dsc.radius = 2;
-                lv_area_t teeth = {cx - 12, cy - 2, cx + 12, cy + 4};
-                lv_draw_rect(layer, &rect_dsc, &teeth);
-            }
             break;
 
         case MOCHI_MOUTH_SMALL_O:
             /* Small O shape */
-            draw_ellipse(layer, cx, cy, (int)(10 * open), (int)(12 * open),
+            draw_ellipse(layer, cx, cy, (int)(SCALE(10) * open), (int)(SCALE(12) * open),
                          theme->mouth, LV_OPA_COVER);
             break;
 
         case MOCHI_MOUTH_SMIRK:
             /* Angled smirk */
-            for (int i = -1; i <= 1; i++) {
-                draw_line(layer, cx - 15, cy + 5 + i, cx + 20, cy - 8 + i, theme->mouth, 3);
-            }
+            draw_line(layer, cx - SCALE(15), cy + SCALE(5), cx + SCALE(20), cy - SCALE(8), theme->mouth, lw);
             break;
 
         case MOCHI_MOUTH_FLAT:
             /* Horizontal line */
-            draw_line(layer, cx - 18, cy, cx + 18, cy, theme->mouth, 4);
+            draw_line(layer, cx - SCALE(18), cy, cx + SCALE(18), cy, theme->mouth, lw + 1);
             break;
 
         case MOCHI_MOUTH_WAVY:
-            /* Wavy line - simplified as zigzag since we can't do curves easily */
-            draw_line(layer, cx - 20, cy, cx - 7, cy + 8, theme->mouth, 3);
-            draw_line(layer, cx - 7, cy + 8, cx + 7, cy, theme->mouth, 3);
-            draw_line(layer, cx + 7, cy, cx + 20, cy + 8, theme->mouth, 3);
+            /* Wavy line */
+            draw_line(layer, cx - SCALE(20), cy, cx - SCALE(7), cy + SCALE(8), theme->mouth, lw);
+            draw_line(layer, cx - SCALE(7), cy + SCALE(8), cx + SCALE(7), cy, theme->mouth, lw);
+            draw_line(layer, cx + SCALE(7), cy, cx + SCALE(20), cy + SCALE(8), theme->mouth, lw);
             break;
 
         case MOCHI_MOUTH_SCREAM:
             /* Large O scream */
-            draw_ellipse(layer, cx, cy + 5, 22, 25, theme->mouth, LV_OPA_COVER);
-            /* Tongue */
-            draw_ellipse(layer, cx, cy + 15, 12, 10,
-                         lv_color_make(255, 107, 107), LV_OPA_COVER);
+            draw_ellipse(layer, cx, cy + SCALE(5), SCALE(22), SCALE(25), theme->mouth, LV_OPA_COVER);
             break;
 
         default:
             /* Default to simple smile */
-            draw_line(layer, cx - 15, cy, cx + 15, cy + 10, theme->mouth, 3);
+            draw_line(layer, cx - SCALE(15), cy, cx + SCALE(15), cy + SCALE(10), theme->mouth, lw);
             break;
     }
 }
@@ -364,13 +359,25 @@ void mochi_face_create(lv_obj_t *parent) {
         return;
     }
 
-    ESP_LOGI(TAG, "Creating mochi face canvas (%dx%d)", CANVAS_WIDTH, CANVAS_HEIGHT);
+    uint32_t bytes_needed = CANVAS_WIDTH * CANVAS_HEIGHT * 2;  /* RGB565 = 2 bytes/pixel */
 
-    /* Create draw buffer - smaller than display to save ~53KB RAM */
+    /* Log heap status before allocation */
+    ESP_LOGI(TAG, "Creating mochi face canvas (%dx%d)", CANVAS_WIDTH, CANVAS_HEIGHT);
+    ESP_LOGI(TAG, "Buffer needed: %lu bytes (%.1f KB)",
+             (unsigned long)bytes_needed, bytes_needed / 1024.0f);
+    ESP_LOGI(TAG, "Free heap: %lu bytes, largest block: %lu bytes",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+
+    /* Create draw buffer - RGB565 for efficiency (no transparency)
+     * RGB565 = 2 bytes per pixel, ARGB8888 = 4 bytes per pixel */
     s_draw_buf = lv_draw_buf_create(CANVAS_WIDTH, CANVAS_HEIGHT, LV_COLOR_FORMAT_RGB565, 0);
     if (s_draw_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to create draw buffer (%d bytes needed)",
-                 CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+        ESP_LOGE(TAG, "Failed to create draw buffer (%lu bytes needed)",
+                 (unsigned long)bytes_needed);
+        ESP_LOGE(TAG, "Largest free block: %lu bytes - need contiguous memory!",
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+        ESP_LOGE(TAG, "Try: reduce CANVAS_SIZE in mochi_face.c (currently %d)", CANVAS_SIZE);
         return;
     }
 
@@ -380,8 +387,11 @@ void mochi_face_create(lv_obj_t *parent) {
     lv_obj_set_size(s_canvas, CANVAS_WIDTH, CANVAS_HEIGHT);
     lv_obj_center(s_canvas);
 
-    /* Initial fill */
-    lv_canvas_fill_bg(s_canvas, lv_color_black(), LV_OPA_COVER);
+    /* Allow click events to pass through to parent */
+    lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    /* Initial fill - white */
+    lv_canvas_fill_bg(s_canvas, lv_color_white(), LV_OPA_COVER);
 
     s_visible = true;
 }

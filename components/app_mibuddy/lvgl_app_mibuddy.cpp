@@ -29,6 +29,52 @@ extern "C" {
 using namespace std;
 
 /*===========================================================================
+ * State Cycling for Touch Demo
+ *===========================================================================*/
+
+static int s_current_state = 0;
+static int s_current_activity = 0;
+static lv_obj_t *s_state_label = NULL;
+
+static void update_state_label(void) {
+    if (s_state_label == NULL) return;
+
+    lv_label_set_text(s_state_label, mochi_state_name((mochi_state_t)s_current_state));
+}
+
+static void cycle_to_next_state(void) {
+    s_current_state = (s_current_state + 1) % MOCHI_STATE_MAX;
+    ESP_BROOKESIA_LOGI("Mochi: %s", mochi_state_name((mochi_state_t)s_current_state));
+    update_state_label();
+    mochi_set((mochi_state_t)s_current_state, MOCHI_ACTIVITY_IDLE);
+}
+
+static void cycle_to_prev_state(void) {
+    s_current_state = (s_current_state + MOCHI_STATE_MAX - 1) % MOCHI_STATE_MAX;
+    ESP_BROOKESIA_LOGI("Mochi: %s", mochi_state_name((mochi_state_t)s_current_state));
+    update_state_label();
+    mochi_set((mochi_state_t)s_current_state, MOCHI_ACTIVITY_IDLE);
+}
+
+static void on_screen_click(lv_event_t *e) {
+    /* Single click - go to next state */
+    cycle_to_next_state();
+}
+
+static void on_screen_gesture(lv_event_t *e) {
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+
+    if (dir == LV_DIR_BOTTOM) {
+        /* Swipe down - go to next state */
+        cycle_to_next_state();
+    } else if (dir == LV_DIR_TOP) {
+        /* Swipe up - go to previous state */
+        cycle_to_prev_state();
+    }
+    /* Ignore left/right swipes */
+}
+
+/*===========================================================================
  * Constructors/Destructor
  *===========================================================================*/
 
@@ -74,14 +120,40 @@ bool PhoneMiBuddyConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
 
-#if 0  /* Temporarily disabled for PNG loading debug */
-    /* Initialize and create mochi avatar */
+    /* Reset state and activity index */
+    s_current_state = 0;
+    s_current_activity = 0;
+
+    /* Initialize and create mochi avatar
+     * Note: Asset setup callback is registered in main.cpp and called during mochi_init()
+     */
     mochi_init();
     mochi_create(lv_screen_active());
 
-    /* Start with happy idle state */
+    /* Create state label overlay at top of screen */
+    s_state_label = lv_label_create(lv_screen_active());
+    lv_obj_set_style_text_color(s_state_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_state_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_bg_color(s_state_label, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_state_label, LV_OPA_70, 0);
+    lv_obj_set_style_pad_all(s_state_label, 8, 0);
+    lv_obj_set_style_radius(s_state_label, 6, 0);
+    lv_obj_align(s_state_label, LV_ALIGN_TOP_MID, 0, 10);
+    /* Bring label to front so it's always visible */
+    lv_obj_move_foreground(s_state_label);
+    update_state_label();
+
+    /* Start with first state (Happy + Idle) */
     mochi_set(MOCHI_STATE_HAPPY, MOCHI_ACTIVITY_IDLE);
-#endif
+
+    ESP_BROOKESIA_LOGI("Mochi: %s - TAP or SWIPE to change state",
+                       mochi_state_name((mochi_state_t)s_current_state));
+
+    /* Add touch handlers to cycle through states */
+    lv_obj_t *screen = lv_screen_active();
+    lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(screen, on_screen_click, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(screen, on_screen_gesture, LV_EVENT_GESTURE, NULL);
 
 #if 0  /* Temporarily disabled */
     /* Create the slideshow UI (shows embedded images, then SD card PNGs) */
@@ -102,15 +174,11 @@ bool PhoneMiBuddyConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
 
-#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Reset label pointer (LVGL will delete it with screen) */
+    s_state_label = NULL;
+
     /* Cleanup mochi resources before closing */
     mochi_deinit();
-#endif
-
-#if 0  /* Temporarily disabled */
-    /* Cleanup slideshow resources */
-    lvgl_mibuddy_cleanup();
-#endif
 
     /* Notify core to close the app */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
@@ -129,15 +197,11 @@ bool PhoneMiBuddyConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
 
-#if 0  /* Temporarily disabled for PNG loading debug */
+    /* Reset label pointer (LVGL will delete it with screen) */
+    s_state_label = NULL;
+
     /* Cleanup mochi resources FIRST before notifying core */
     mochi_deinit();
-#endif
-
-#if 0  /* Temporarily disabled */
-    /* Cleanup slideshow resources */
-    lvgl_mibuddy_cleanup();
-#endif
 
     /* Notify core that app is closing */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
@@ -156,15 +220,8 @@ bool PhoneMiBuddyConf::pause(void)
 {
     ESP_BROOKESIA_LOGD("Pause");
 
-#if 0  /* Temporarily disabled for PNG loading debug */
     /* Pause mochi when app is paused */
     mochi_pause();
-#endif
-
-#if 0  /* Temporarily disabled */
-    /* Pause slideshow timer */
-    lvgl_mibuddy_pause();
-#endif
 
     return true;
 }
@@ -180,15 +237,8 @@ bool PhoneMiBuddyConf::resume(void)
 {
     ESP_BROOKESIA_LOGD("Resume");
 
-#if 0  /* Temporarily disabled for PNG loading debug */
     /* Resume mochi when app is resumed */
     mochi_resume();
-#endif
-
-#if 0  /* Temporarily disabled */
-    /* Resume slideshow timer */
-    lvgl_mibuddy_resume();
-#endif
 
     return true;
 }
