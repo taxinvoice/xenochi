@@ -133,11 +133,11 @@ extern "C" {
 
 /*===========================================================================
  * I2S Audio Configuration
- * Stereo audio at 16kHz, 32-bit samples
+ * Stereo audio at 44.1kHz, 32-bit samples (standard for MP3 playback)
  *===========================================================================*/
 
 #define I2S_NUM             I2S_NUM_0       /**< I2S port number */
-#define I2S_SAMPLE_RATE     16000           /**< Sample rate: 16kHz */
+#define I2S_SAMPLE_RATE     44100           /**< Sample rate: 44.1kHz for MP3 playback */
 #define I2S_CHANNEL_FORMAT  2               /**< Stereo (2 channels) */
 #define I2S_BITS_PER_CHAN   32              /**< 32 bits per channel */
 #define GPIO_I2S_LRCK       (GPIO_NUM_22)   /**< Word select (L/R clock) */
@@ -173,7 +173,7 @@ extern "C" {
      * Configured for stereo, 32-bit samples.
      */
     #define I2S_CONFIG_DEFAULT(sample_rate, channel_fmt, bits_per_chan) { \
-            .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(16000), \
+            .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate), \
             .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(32, I2S_SLOT_MODE_STEREO), \
             .gpio_cfg = { \
                 .mclk = GPIO_I2S_MCLK, \

@@ -9,7 +9,7 @@
 static const char *TAG = "bsp codec";
 
 #define ADC_I2S_CHANNEL 4
-static int s_play_sample_rate = 16000;
+static int s_play_sample_rate = 44100;
 static int s_play_channel_format = 2;
 static int s_bits_per_chan = 32;
 
@@ -240,49 +240,25 @@ esp_err_t esp_audio_play(const int16_t* data, int length, uint32_t ticks_to_wait
         return ESP_FAIL;
     }
 
-    int out_length= length;
-    int audio_time = 1;
-    audio_time *= (16000 / s_play_sample_rate);
-    audio_time *= (2 / s_play_channel_format);
+    int out_length = length;
 
+    /* Convert 16-bit samples to 32-bit for I2S output */
     int *data_out = NULL;
-    if (s_bits_per_chan != 32) {
+    if (s_bits_per_chan == 32) {
         out_length = length * 2;
         data_out = malloc(out_length);
+        if (data_out == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate audio buffer");
+            return ESP_FAIL;
+        }
         for (int i = 0; i < length / sizeof(int16_t); i++) {
-            int ret = data[i];
-            data_out[i] = ret << 16;
-        }
-    }
-
-    int *data_out_1 = NULL;
-    if (s_play_channel_format != 2 || s_play_sample_rate != 16000) {
-        out_length *= audio_time;
-        data_out_1 = malloc(out_length);
-        int *tmp_data = NULL;
-        if (data_out != NULL) {
-            tmp_data = data_out;
-        } else {
-            tmp_data = (int *)data;
-        }
-
-        for (int i = 0; i < out_length / (audio_time * sizeof(int)); i++) {
-            for (int j = 0; j < audio_time; j++) {
-                data_out_1[audio_time * i + j] = tmp_data[i];
-            }
-        }
-        if (data_out != NULL) {
-            free(data_out);
-            data_out = NULL;
+            data_out[i] = ((int)data[i]) << 16;
         }
     }
 
     if (data_out != NULL) {
         ret = esp_codec_dev_write(play_dev, (void *)data_out, out_length);
         free(data_out);
-    } else if (data_out_1 != NULL) {
-        ret = esp_codec_dev_write(play_dev, (void *)data_out_1, out_length);
-        free(data_out_1);
     } else {
         ret = esp_codec_dev_write(play_dev, (void *)data, length);
     }

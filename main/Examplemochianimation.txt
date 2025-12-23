@@ -1,0 +1,627 @@
+/*
+ * ESP32 Mochi Avatar - Modern, Clean, Cute Face
+ * 
+ * A unique avatar theme featuring:
+ *   - Soft pastel color schemes (Sakura, Mint, Lavender, Peach, Cloud)
+ *   - Smooth rounded "mochi" face shape
+ *   - Large expressive eyes with sparkle highlights
+ *   - Breathing/squish animations
+ *   - Contextual particle effects
+ * 
+ * Hardware: ESP32 + Color TFT Display (320x240 recommended)
+ * Libraries: M5GFX / LovyanGFX / TFT_eSPI
+ */
+
+#include <M5Unified.h>
+#include <math.h>
+
+// ============== COLOR SCHEMES ==============
+enum ColorScheme {
+  SCHEME_SAKURA,
+  SCHEME_MINT,
+  SCHEME_LAVENDER,
+  SCHEME_PEACH,
+  SCHEME_CLOUD,
+  SCHEME_COUNT
+};
+
+struct ThemeColors {
+  uint16_t bg;
+  uint16_t bgLight;
+  uint16_t face;
+  uint16_t faceHighlight;
+  uint16_t faceShadow;
+  uint16_t eye;
+  uint16_t pupil;
+  uint16_t mouth;
+  uint16_t blush;
+  uint16_t accent;
+  uint16_t particle;
+  const char* name;
+};
+
+// RGB565 color conversions
+#define RGB565(r, g, b) ((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))
+
+ThemeColors schemes[SCHEME_COUNT] = {
+  // SAKURA - Pink/Rose theme
+  {
+    RGB565(26, 22, 37),      // bg
+    RGB565(45, 38, 64),      // bgLight
+    RGB565(255, 245, 245),   // face
+    RGB565(255, 255, 255),   // faceHighlight
+    RGB565(255, 228, 232),   // faceShadow
+    RGB565(45, 38, 64),      // eye
+    RGB565(255, 107, 157),   // pupil
+    RGB565(255, 107, 157),   // mouth
+    RGB565(255, 179, 198),   // blush
+    RGB565(255, 155, 193),   // accent
+    RGB565(255, 209, 220),   // particle
+    "Sakura"
+  },
+  // MINT - Teal/Aqua theme
+  {
+    RGB565(15, 26, 26),
+    RGB565(26, 47, 47),
+    RGB565(240, 255, 255),
+    RGB565(255, 255, 255),
+    RGB565(212, 245, 245),
+    RGB565(26, 47, 47),
+    RGB565(64, 201, 198),
+    RGB565(64, 201, 198),
+    RGB565(168, 230, 207),
+    RGB565(127, 219, 218),
+    RGB565(200, 247, 247),
+    "Mint"
+  },
+  // LAVENDER - Purple theme
+  {
+    RGB565(26, 22, 37),
+    RGB565(42, 32, 64),
+    RGB565(248, 245, 255),
+    RGB565(255, 255, 255),
+    RGB565(232, 224, 240),
+    RGB565(42, 32, 64),
+    RGB565(157, 124, 216),
+    RGB565(157, 124, 216),
+    RGB565(219, 184, 255),
+    RGB565(196, 167, 231),
+    RGB565(232, 213, 255),
+    "Lavender"
+  },
+  // PEACH - Orange/Coral theme
+  {
+    RGB565(31, 23, 20),
+    RGB565(45, 36, 32),
+    RGB565(255, 248, 240),
+    RGB565(255, 255, 255),
+    RGB565(255, 232, 214),
+    RGB565(45, 36, 32),
+    RGB565(255, 140, 90),
+    RGB565(255, 140, 90),
+    RGB565(255, 196, 168),
+    RGB565(255, 176, 136),
+    RGB565(255, 216, 200),
+    "Peach"
+  },
+  // CLOUD - Blue/Sky theme
+  {
+    RGB565(21, 24, 32),
+    RGB565(32, 37, 53),
+    RGB565(245, 248, 255),
+    RGB565(255, 255, 255),
+    RGB565(221, 229, 245),
+    RGB565(32, 37, 53),
+    RGB565(85, 136, 204),
+    RGB565(85, 136, 204),
+    RGB565(184, 208, 240),
+    RGB565(136, 168, 216),
+    RGB565(208, 224, 255),
+    "Cloud"
+  },
+};
+
+ColorScheme currentScheme = SCHEME_SAKURA;
+ThemeColors* theme = &schemes[SCHEME_SAKURA];
+
+// ============== EXPRESSION STATE ==============
+enum Expression {
+  EXPR_HAPPY,
+  EXPR_EXCITED,
+  EXPR_WORRIED,
+  EXPR_COOL,
+  EXPR_DIZZY,
+  EXPR_PANIC,
+  EXPR_SLEEPY,
+  EXPR_SHOCKED
+};
+
+struct FaceState {
+  float eyeScale;
+  float eyeOffsetX;
+  float eyeOffsetY;
+  float pupilSize;
+  float eyeSquish;
+  float mouthOpen;
+  uint8_t mouthType;  // 0=smile, 1=open, 2=small_o, 3=smirk, 4=flat, 5=wavy, 6=scream
+  float faceSquish;
+  float faceOffsetY;
+  float faceRotation;
+  bool showBlush;
+  bool showSparkles;
+  uint8_t particleType;  // 0=none, 1=float, 2=burst, 3=sweat, 4=sparkle, 5=spiral, 6=zzz
+};
+
+FaceState currentFace = {1.0, 0, 0, 1.0, 0, 0.3, 0, 0, 0, 0, true, true, 1};
+Expression currentExpr = EXPR_HAPPY;
+
+// Animation
+int animFrame = 0;
+float intensity = 0.7;
+
+// Display
+int screenW, screenH;
+int centerX, centerY;
+M5Canvas canvas(&M5.Lcd);
+
+// ============== SETUP ==============
+void setup() {
+  M5.begin();
+  
+  screenW = M5.Lcd.width();
+  screenH = M5.Lcd.height();
+  centerX = screenW / 2;
+  centerY = screenH / 2 + 5;
+  
+  // Create sprite for smooth drawing
+  canvas.createSprite(screenW, screenH);
+  canvas.setColorDepth(16);
+  
+  Serial.begin(115200);
+  Serial.println("Mochi Avatar Started!");
+  Serial.println("Button A: Change color scheme");
+  Serial.println("Button B: Change expression");
+  
+  drawFace();
+}
+
+// ============== MAIN LOOP ==============
+void loop() {
+  M5.update();
+  animFrame++;
+  
+  // Cycle color scheme
+  if (M5.BtnA.wasPressed()) {
+    currentScheme = (ColorScheme)((currentScheme + 1) % SCHEME_COUNT);
+    theme = &schemes[currentScheme];
+    Serial.printf("Theme: %s\n", theme->name);
+  }
+  
+  // Cycle expression
+  if (M5.BtnB.wasPressed()) {
+    currentExpr = (Expression)((currentExpr + 1) % 8);
+    updateExpression(currentExpr);
+  }
+  
+  // Read IMU for driving reactions (if available)
+  auto imu = M5.Imu.update();
+  if (imu) {
+    auto data = M5.Imu.getImuData();
+    detectDrivingState(data.accel.x, data.accel.y, data.accel.z,
+                       data.gyro.x, data.gyro.y, data.gyro.z);
+  }
+  
+  // Update animated expressions
+  updateAnimations();
+  
+  // Draw
+  drawFace();
+  
+  delay(25);  // ~40fps
+}
+
+// ============== EXPRESSION UPDATES ==============
+void updateExpression(Expression expr) {
+  // Reset to defaults
+  currentFace = {1.0, 0, 0, 1.0, 0, 0.3, 0, 0, 0, 0, true, true, 1};
+  
+  switch (expr) {
+    case EXPR_HAPPY:
+      currentFace.mouthType = 0;
+      currentFace.showBlush = true;
+      currentFace.showSparkles = true;
+      currentFace.particleType = 1;  // float
+      break;
+      
+    case EXPR_EXCITED:
+      currentFace.eyeScale = 0.8;
+      currentFace.eyeSquish = 0.3 * intensity;
+      currentFace.mouthType = 1;  // open smile
+      currentFace.mouthOpen = 0.7;
+      currentFace.faceSquish = 0.05 * intensity;
+      currentFace.showBlush = true;
+      currentFace.showSparkles = true;
+      currentFace.particleType = 2;  // burst
+      break;
+      
+    case EXPR_WORRIED:
+      currentFace.eyeScale = 1.2;
+      currentFace.pupilSize = 1.3;
+      currentFace.mouthType = 2;  // small o
+      currentFace.mouthOpen = 0.5;
+      currentFace.showBlush = false;
+      currentFace.showSparkles = false;
+      currentFace.particleType = 3;  // sweat
+      break;
+      
+    case EXPR_COOL:
+      currentFace.eyeScale = 0.9;
+      currentFace.eyeSquish = 0.15;
+      currentFace.mouthType = 3;  // smirk
+      currentFace.showBlush = false;
+      currentFace.showSparkles = true;
+      currentFace.particleType = 4;  // sparkle
+      break;
+      
+    case EXPR_DIZZY:
+      currentFace.mouthType = 5;  // wavy
+      currentFace.showBlush = false;
+      currentFace.showSparkles = false;
+      currentFace.particleType = 5;  // spiral
+      break;
+      
+    case EXPR_PANIC:
+      currentFace.eyeScale = 1.4;
+      currentFace.pupilSize = 0.4;
+      currentFace.mouthType = 6;  // scream
+      currentFace.mouthOpen = 1.0;
+      currentFace.showBlush = false;
+      currentFace.showSparkles = false;
+      currentFace.particleType = 3;  // sweat
+      break;
+      
+    case EXPR_SLEEPY:
+      currentFace.eyeScale = 0.15;
+      currentFace.eyeSquish = 0.8;
+      currentFace.mouthType = 0;
+      currentFace.mouthOpen = 0.2;
+      currentFace.showBlush = true;
+      currentFace.showSparkles = false;
+      currentFace.particleType = 6;  // zzz
+      break;
+      
+    case EXPR_SHOCKED:
+      currentFace.eyeScale = 1.3;
+      currentFace.pupilSize = 0.3;
+      currentFace.mouthType = 2;  // small o
+      currentFace.mouthOpen = 0.8;
+      currentFace.showBlush = false;
+      currentFace.showSparkles = false;
+      currentFace.particleType = 0;
+      break;
+  }
+}
+
+void updateAnimations() {
+  float t = animFrame * 0.05;
+  
+  switch (currentExpr) {
+    case EXPR_HAPPY:
+      currentFace.eyeOffsetX = sin(t) * 2;
+      currentFace.eyeOffsetY = sin(t * 0.6) * 1;
+      currentFace.faceSquish = sin(t * 0.4) * 0.02;
+      currentFace.faceOffsetY = sin(t * 0.8) * 2;
+      break;
+      
+    case EXPR_EXCITED:
+      currentFace.eyeOffsetY = 3 * intensity;
+      currentFace.faceOffsetY = 5 * intensity;
+      break;
+      
+    case EXPR_WORRIED:
+      currentFace.eyeOffsetY = -5 * intensity;
+      currentFace.faceOffsetY = -5 * intensity;
+      break;
+      
+    case EXPR_DIZZY:
+      currentFace.eyeScale = 1.0 + sin(t * 6) * 0.15 * intensity;
+      currentFace.eyeOffsetX = sin(t * 10) * 6 * intensity;
+      currentFace.eyeOffsetY = cos(t * 8) * 4 * intensity;
+      currentFace.faceRotation = sin(t * 5) * 5 * intensity;
+      currentFace.faceOffsetY = abs(sin(t * 6)) * 8 * intensity;
+      break;
+      
+    case EXPR_PANIC:
+      currentFace.faceRotation = animFrame * 8 * intensity;
+      break;
+      
+    case EXPR_SLEEPY:
+      currentFace.eyeScale = 0.15 + sin(t) * 0.05;
+      currentFace.mouthOpen = 0.2 + sin(t * 1.6) * 0.1;
+      currentFace.faceOffsetY = 3 + sin(t * 1.2) * 2;
+      currentFace.faceRotation = -3 + sin(t * 0.8) * 2;
+      break;
+      
+    default:
+      break;
+  }
+}
+
+// ============== DRIVING STATE DETECTION ==============
+void detectDrivingState(float ax, float ay, float az, float gx, float gy, float gz) {
+  // Rolling
+  if (abs(gx) > 90 || abs(gy) > 90) {
+    currentExpr = EXPR_PANIC;
+    updateExpression(EXPR_PANIC);
+    return;
+  }
+  
+  // High G collision
+  float totalG = sqrt(ax*ax + ay*ay + az*az);
+  if (totalG > 3.0) {
+    currentExpr = EXPR_SHOCKED;
+    updateExpression(EXPR_SHOCKED);
+    return;
+  }
+  
+  // Sliding
+  if (abs(gz) > 50) {
+    currentExpr = EXPR_COOL;
+    updateExpression(EXPR_COOL);
+    currentFace.eyeOffsetX = (gz > 0 ? 8 : -8) * intensity;
+    currentFace.faceRotation = (gz > 0 ? 8 : -8) * intensity;
+    return;
+  }
+  
+  // Hard braking
+  if (ax > 0.5) {
+    currentExpr = EXPR_WORRIED;
+    updateExpression(EXPR_WORRIED);
+    return;
+  }
+  
+  // Hard acceleration
+  if (ax < -0.5) {
+    currentExpr = EXPR_EXCITED;
+    updateExpression(EXPR_EXCITED);
+    return;
+  }
+  
+  // Sharp turns
+  if (abs(ay) > 0.4) {
+    currentFace.eyeOffsetX = ay * 20;
+    currentFace.faceRotation = ay * 10;
+  }
+}
+
+// ============== DRAWING ==============
+void drawFace() {
+  // Background gradient (simulate with two rects)
+  canvas.fillScreen(theme->bg);
+  canvas.fillEllipse(centerX, centerY - 30, screenW/2, screenH/2, theme->bgLight);
+  
+  // Particles (background)
+  drawParticles();
+  
+  // Calculate face position with squish
+  int faceX = centerX;
+  int faceY = centerY + (int)currentFace.faceOffsetY;
+  float scaleX = 1.0 + currentFace.faceSquish;
+  float scaleY = 1.0 - currentFace.faceSquish;
+  
+  // Face shadow
+  canvas.fillEllipse(faceX + 3, faceY + 5, 88 * scaleX, 78 * scaleY, theme->faceShadow);
+  
+  // Main face
+  canvas.fillEllipse(faceX, faceY, 85 * scaleX, 75 * scaleY, theme->face);
+  
+  // Face highlight (top-left)
+  canvas.fillEllipse(faceX - 15, faceY - 35, 40, 20, theme->faceHighlight);
+  
+  // Blush
+  if (currentFace.showBlush) {
+    // Semi-transparent blush effect
+    for (int i = 0; i < 3; i++) {
+      canvas.fillEllipse(faceX - 55 + i, faceY + 20, 18 - i*3, 10 - i*2, theme->blush);
+      canvas.fillEllipse(faceX + 55 - i, faceY + 20, 18 - i*3, 10 - i*2, theme->blush);
+    }
+  }
+  
+  // Eyes
+  drawEye(faceX - 35, faceY - 10, false);  // Left eye
+  drawEye(faceX + 35, faceY - 10, true);   // Right eye
+  
+  // Mouth
+  drawMouth(faceX, faceY + 40);
+  
+  // Theme indicator
+  canvas.fillRoundRect(5, 5, 70, 18, 9, 0x0000);
+  canvas.setTextColor(TFT_WHITE);
+  canvas.setTextSize(1);
+  canvas.drawCentreString(theme->name, 40, 9, 1);
+  
+  // Push to display
+  canvas.pushSprite(0, 0);
+}
+
+void drawEye(int cx, int cy, bool isRight) {
+  float ex = currentFace.eyeOffsetX;
+  float ey = currentFace.eyeOffsetY;
+  float scale = currentFace.eyeScale;
+  float squish = currentFace.eyeSquish;
+  
+  int eyeW = 22 * scale;
+  int eyeH = 28 * scale * (1 - squish);
+  int pupilW = 10 * currentFace.pupilSize * scale;
+  int pupilH = 12 * currentFace.pupilSize * scale;
+  
+  // Eye background
+  canvas.fillEllipse(cx + ex, cy + ey, eyeW, eyeH, theme->eye);
+  
+  // Pupil
+  canvas.fillEllipse(cx + ex * 1.15, cy + ey * 0.5, pupilW, pupilH, theme->pupil);
+  
+  // Main highlight
+  int hlX = isRight ? cx - 7 : cx - 7;
+  int hlY = cy - 10;
+  canvas.fillCircle(hlX + ex * 0.5, hlY + ey * 0.3, 7 * scale, TFT_WHITE);
+  
+  // Sparkle highlight
+  if (currentFace.showSparkles) {
+    int spX = isRight ? cx + 5 : cx + 5;
+    int spY = cy + 5;
+    int spSize = 3 * scale;
+    // Animated sparkle
+    if ((animFrame / 10) % 3 != 0) {
+      canvas.fillCircle(spX + ex * 0.3, spY + ey * 0.2, spSize, theme->accent);
+    }
+  }
+}
+
+void drawMouth(int cx, int cy) {
+  uint16_t color = theme->mouth;
+  float open = currentFace.mouthOpen;
+  
+  switch (currentFace.mouthType) {
+    case 0:  // Smile
+      for (int i = -1; i <= 1; i++) {
+        canvas.drawLine(cx - 20, cy + i, cx, cy + 12 * open + i, color);
+        canvas.drawLine(cx, cy + 12 * open + i, cx + 20, cy + i, color);
+      }
+      break;
+      
+    case 1:  // Open smile
+      canvas.fillEllipse(cx, cy + 5, 18 * open, 15 * open, color);
+      // Tongue
+      canvas.fillEllipse(cx, cy + 12, 10 * open, 8 * open, 0xFB2C);
+      // Teeth hint
+      canvas.fillRoundRect(cx - 12, cy - 2, 24, 6, 2, TFT_WHITE);
+      break;
+      
+    case 2:  // Small O
+      canvas.fillEllipse(cx, cy, 10 * open, 12 * open, color);
+      break;
+      
+    case 3:  // Smirk
+      for (int i = -1; i <= 1; i++) {
+        canvas.drawLine(cx - 15, cy + 5 + i, cx + 20, cy - 8 + i, color);
+      }
+      break;
+      
+    case 4:  // Flat
+      canvas.drawLine(cx - 18, cy, cx + 18, cy, color);
+      canvas.drawLine(cx - 18, cy + 1, cx + 18, cy + 1, color);
+      break;
+      
+    case 5:  // Wavy (animated)
+      {
+        float t = animFrame * 0.1;
+        int y1 = cy + sin(t * 2) * 3;
+        int y2 = cy + 8 + cos(t * 2.5) * 3;
+        int y3 = cy + sin(t * 3) * 3;
+        canvas.drawLine(cx - 20, y1, cx - 7, y2, color);
+        canvas.drawLine(cx - 7, y2, cx + 7, y3, color);
+        canvas.drawLine(cx + 7, y3, cx + 20, y1, color);
+      }
+      break;
+      
+    case 6:  // Scream
+      canvas.fillEllipse(cx, cy + 5, 22, 25, color);
+      canvas.fillEllipse(cx, cy + 15, 12, 10, 0xFB2C);  // Tongue
+      break;
+      
+    default:
+      canvas.drawLine(cx - 15, cy, cx + 15, cy, color);
+      break;
+  }
+}
+
+void drawParticles() {
+  switch (currentFace.particleType) {
+    case 1:  // Float - gentle floating particles
+      for (int i = 0; i < 5; i++) {
+        int x = centerX + sin(animFrame * 0.02 + i * 1.5) * 100 - 50;
+        int y = 20 + cos(animFrame * 0.015 + i * 1.2) * 60 + i * 25;
+        int size = 3 + sin(animFrame * 0.05 + i) * 1;
+        canvas.fillCircle(x, y, size, theme->particle);
+      }
+      break;
+      
+    case 2:  // Burst - excited particles
+      for (int i = 0; i < 8; i++) {
+        float angle = (i / 8.0) * PI * 2 + animFrame * 0.1;
+        int dist = 70 + sin(animFrame * 0.2 + i) * 15;
+        int x = centerX + cos(angle) * dist;
+        int y = centerY + sin(angle) * dist * 0.5;
+        canvas.fillCircle(x, y, 4, theme->accent);
+      }
+      break;
+      
+    case 3:  // Sweat
+      {
+        int sweatY = (animFrame * 2) % 50;
+        canvas.fillEllipse(centerX - 70, 60 + sweatY, 4, 6, 0x867F);
+        canvas.fillEllipse(centerX + 70, 50 + (sweatY + 15) % 50, 3, 5, 0x867F);
+      }
+      break;
+      
+    case 4:  // Sparkle - rotating stars
+      for (int i = 0; i < 4; i++) {
+        int x = centerX - 60 + i * 45 + sin(animFrame * 0.1 + i) * 8;
+        int y = 40 + cos(animFrame * 0.08 + i * 2) * 25;
+        drawSparkle(x, y, animFrame * 3 + i * 45, theme->accent);
+      }
+      break;
+      
+    case 5:  // Spiral - dizzy spirals
+      for (int i = 0; i < 3; i++) {
+        float angle = animFrame * 0.15 + i * 2;
+        int x = centerX + cos(angle) * (35 + i * 15);
+        int y = centerY - 30 + sin(angle) * (25 + i * 10);
+        canvas.drawCircle(x, y, 4, theme->accent);
+        canvas.drawCircle(x, y, 6, theme->accent);
+      }
+      break;
+      
+    case 6:  // ZZZ - sleep bubbles
+      {
+        float zOff = sin(animFrame * 0.05) * 5;
+        canvas.setTextColor(theme->accent);
+        canvas.setTextSize(2);
+        canvas.drawString("Z", centerX + 55 + zOff, 50);
+        canvas.setTextSize(1);
+        canvas.drawString("z", centerX + 70 + zOff * 0.7, 40);
+        canvas.drawString("z", centerX + 80 + zOff * 0.5, 32);
+      }
+      break;
+  }
+}
+
+void drawSparkle(int x, int y, int rotation, uint16_t color) {
+  // Simple 4-point star
+  float rad = rotation * PI / 180.0;
+  int size = 5;
+  
+  for (int i = 0; i < 4; i++) {
+    float angle = rad + i * PI / 2;
+    int x2 = x + cos(angle) * size;
+    int y2 = y + sin(angle) * size;
+    canvas.drawLine(x, y, x2, y2, color);
+  }
+}
+
+// ============== UTILITY ==============
+void setColorScheme(ColorScheme scheme) {
+  currentScheme = scheme;
+  theme = &schemes[scheme];
+}
+
+void nextColorScheme() {
+  currentScheme = (ColorScheme)((currentScheme + 1) % SCHEME_COUNT);
+  theme = &schemes[currentScheme];
+}
+
+void setExpression(Expression expr) {
+  currentExpr = expr;
+  updateExpression(expr);
+}

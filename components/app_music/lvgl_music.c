@@ -9,13 +9,14 @@
 #include "lvgl_music.h"
 #include "bsp_board.h"
 
-static char SD_Name[20][100]; 
-uint16_t file_count; 
+#define MAX_MUSIC_FILES 20
+static char SD_Name[MAX_MUSIC_FILES][100];
+uint16_t file_count;
 
-void LVGL_Search_Music(void) 
-{        
-    file_count = Folder_retrieval("/sdcard/Music",".mp3",SD_Name,100);
-    printf("file_count=%d\r\n",file_count);                                                        
+void LVGL_Search_Music(void)
+{
+    file_count = Folder_retrieval("/sdcard/Music", ".mp3", SD_Name, MAX_MUSIC_FILES);
+    printf("file_count=%d\r\n", file_count);
 }
 
 

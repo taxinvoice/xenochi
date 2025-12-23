@@ -82,6 +82,9 @@ bool PhoneMusicConf::run(void)
     /* Initialize audio playback subsystem (command queue, task, pipeline) */
     Audio_Play_Init();
 
+    /* Note: LVGL_Search_Music() is called once at startup in main.cpp,
+     * so no need to rescan here - just create the UI */
+
     /* Create the music player UI on the active screen */
     lvgl_music_create(lv_screen_active());
 

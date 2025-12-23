@@ -194,10 +194,6 @@ static lv_obj_t * add_list_button(lv_obj_t * parent, uint32_t track_id)
     lv_obj_add_style(btn, &style_button_dis, LV_STATE_DISABLED);
     lv_obj_add_event_cb(btn, btn_click_event_cb, LV_EVENT_CLICKED, NULL);
 
-    if(track_id >= 3) {
-        lv_obj_add_state(btn, LV_STATE_DISABLED);
-    }
-
     lv_obj_t * icon = lv_image_create(btn);
     lv_image_set_src(icon, &img_lv_demo_music_btn_list_play);
     lv_obj_set_grid_cell(icon, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 2);

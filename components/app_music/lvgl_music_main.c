@@ -997,15 +997,17 @@ static void play_event_click_cb(lv_event_t * e)
 
 static void prev_click_event_cb(lv_event_t * e)
 {
-    LV_UNUSED(e);
-    //lv_demo_music_album_next(false);
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        lv_demo_music_album_next(false);
+    }
 }
 
 static void next_click_event_cb(lv_event_t * e)
 {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
-        //lv_demo_music_album_next(true);
+        lv_demo_music_album_next(true);
     }
 }
 
