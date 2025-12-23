@@ -2,17 +2,11 @@
 set(SOURCES
     "./main.cpp"
     "./240_284/dark/main_bg_240_284.c"
-    # Embedded assets
-    "./assets/sounds/beep_8k_mono.c"
-    "./assets/images/icon_sample_16x16.c"
-    # MochiState asset configuration
-    "./mochi_asset_setup.c"
 )
 
 set(INCLUDE_DIRS
     "."
     "./240_284/dark"
-    "./assets"
 )
 
 

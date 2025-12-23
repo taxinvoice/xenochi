@@ -33,8 +33,6 @@
 #include "lvgl_app_music.hpp"       /* Music player with file browser */
 #include "lvgl_app_rec.hpp"         /* Audio recorder to WAV */
 #include "lvgl_app_mibuddy.hpp"     /* MiBuddy virtual buddy (image slideshow) */
-#include "mochi_state.h"            /* MochiState system for MiBuddy */
-#include "assets.h"                 /* Embedded assets (sounds, images) */
 #include "audio_driver.h"           /* Audio playback control */
 #include "wifi_manager.h"           /* WiFi auto-connect and status */
 #include "time_sync.h"              /* NTP time sync to RTC */
@@ -165,12 +163,6 @@ extern "C" void app_main(void)
      * - IMU (QMI8658)
      */
     bsp_init();
-
-    /* Register MochiState asset setup callback
-     * This configures embedded sounds/images for mochi emotional states.
-     * The callback is invoked when mochi_init() is called from the MiBuddy app.
-     */
-    mochi_register_asset_setup(mochi_setup_assets);
 
     /* Get handles to initialized peripherals for later use */
     bsp_handles_t *handles = bsp_display_get_handles();

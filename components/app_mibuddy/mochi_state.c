@@ -5,6 +5,7 @@
 
 #include "mochi_state.h"
 #include "mochi_assets.h"
+#include "mochi_sounds.h"
 #include "mochi_theme.h"
 #include "esp_log.h"
 #include <string.h>
@@ -67,6 +68,12 @@ extern void mochi_audio_stop(void);
         .particle_type = particle \
     }
 
+/* Embedded beep sound asset */
+#define MOCHI_BEEP_EMBEDDED() \
+    { .source = MOCHI_ASSET_EMBEDDED, \
+      .embedded = { .pcm_data = mochi_beep_8k, .pcm_len = MOCHI_BEEP_8K_LEN, \
+                    .sample_rate = MOCHI_BEEP_8K_RATE, .channels = MOCHI_BEEP_8K_CHANNELS } }
+
 static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
     /* MOCHI_STATE_HAPPY */
     {
@@ -78,7 +85,8 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             true, true,          /* show_blush, show_sparkles */
             MOCHI_PARTICLE_FLOAT /* particle_type */
         ),
-        /* Assets configured at runtime via mochi_configure_state() */
+        .audio.enter = MOCHI_SOUND_SD("happy_enter.mp3"),
+        .audio.loop = MOCHI_SOUND_SD("happy_loop.mp3"),
     },
     /* MOCHI_STATE_EXCITED */
     {
@@ -90,6 +98,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             true, true,
             MOCHI_PARTICLE_BURST
         ),
+        .audio.loop = MOCHI_BEEP_EMBEDDED(),
     },
     /* MOCHI_STATE_WORRIED */
     {
@@ -145,7 +154,8 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             true, false,
             MOCHI_PARTICLE_ZZZ
         ),
-        /* Assets configured at runtime via mochi_configure_state() */
+        .audio.loop = MOCHI_SOUND_SD("sleepy_loop.mp3"),
+        .background.image = MOCHI_IMAGE_SD("sleepy_bg.png"),
     },
     /* MOCHI_STATE_SHOCKED */
     {
@@ -322,13 +332,19 @@ static void apply_state_assets(mochi_state_t state) {
     log_sound_asset("Enter Sound", &cfg->audio.enter);
     log_sound_asset("Loop Sound", &cfg->audio.loop);
 
-    /* Play enter sound if configured */
+    /* Stop any previously playing audio before starting new sounds */
+    mochi_stop_asset_sound();
+
+    /* Play enter sound if configured (one-shot, blocks until complete for embedded PCM) */
     if (cfg->audio.enter.source != MOCHI_ASSET_NONE) {
-        ESP_LOGI(TAG, "Playing enter sound...");
-        esp_err_t err = mochi_play_asset_sound(&cfg->audio.enter, false);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to play enter sound: %s", esp_err_to_name(err));
-        }
+        /* Silently try to play - file may not exist */
+        mochi_play_asset_sound(&cfg->audio.enter, false);
+    }
+
+    /* Start loop sound if configured (plays continuously while in this state) */
+    if (cfg->audio.loop.source != MOCHI_ASSET_NONE) {
+        /* Silently try to play - file may not exist */
+        mochi_play_asset_sound(&cfg->audio.loop, true);
     }
 
     /* Update sprite overlay */
@@ -419,7 +435,7 @@ esp_err_t mochi_init(void) {
 
     s_mochi.initialized = true;
 
-    /* Call asset setup callback if registered */
+    /* Optional: Call asset setup callback if registered (for embedded assets or overrides) */
     if (s_asset_setup_callback) {
         ESP_LOGI(TAG, "Calling asset setup callback");
         s_asset_setup_callback();
@@ -433,13 +449,29 @@ void mochi_deinit(void) {
 
     ESP_LOGI(TAG, "Deinitializing mochi state system");
 
+    /* Stop any playing audio */
+    mochi_stop_asset_sound();
+
     if (s_mochi.created) {
         mochi_anim_stop();
         mochi_particles_destroy();
         mochi_face_destroy();
+
+        /* Clean up asset overlay objects (LVGL will delete them with parent screen,
+         * but we need to clear our pointers to avoid dangling references) */
+        if (s_mochi.sprite_obj) {
+            lv_obj_delete(s_mochi.sprite_obj);
+            s_mochi.sprite_obj = NULL;
+        }
+        if (s_mochi.background_obj) {
+            lv_obj_delete(s_mochi.background_obj);
+            s_mochi.background_obj = NULL;
+        }
+
         s_mochi.created = false;
     }
 
+    s_mochi.parent = NULL;
     mochi_anim_deinit();
     s_mochi.initialized = false;
 }

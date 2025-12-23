@@ -31,14 +31,158 @@
 #include "bsp_board.h"
 #include "pcf85063a.h"
 #include "lwip/ip_addr.h"
+#include "lwip/netdb.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <sys/time.h>
+#include <arpa/inet.h>
 
 static const char *TAG = "time_sync";
 
 /* Module state */
 static time_sync_callback_t s_callback = NULL;
 static volatile bool s_is_synced = false;
+
+/**
+ * @brief Set a public DNS server as fallback if router DNS fails
+ *
+ * Some routers don't properly forward DNS queries. This sets a public
+ * DNS server (configured via Kconfig) as the primary DNS server.
+ */
+static void set_public_dns(void)
+{
+#ifdef CONFIG_MIBUDDY_PUBLIC_DNS
+    /* Skip if public DNS is not configured (empty string) */
+    if (strlen(CONFIG_MIBUDDY_PUBLIC_DNS) == 0) {
+        ESP_LOGI(TAG, "Public DNS not configured, using router DNS");
+        return;
+    }
+
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == NULL) {
+        ESP_LOGW(TAG, "Cannot set public DNS: no network interface");
+        return;
+    }
+
+    esp_netif_dns_info_t dns_info;
+    dns_info.ip.u_addr.ip4.addr = ipaddr_addr(CONFIG_MIBUDDY_PUBLIC_DNS);
+    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+
+    esp_err_t err = esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Set public DNS: %s", CONFIG_MIBUDDY_PUBLIC_DNS);
+    } else {
+        ESP_LOGE(TAG, "Failed to set public DNS: %s", esp_err_to_name(err));
+    }
+#else
+    ESP_LOGD(TAG, "Public DNS not configured in Kconfig");
+#endif
+}
+
+/**
+ * @brief Test DNS resolution for a hostname and log the result
+ *
+ * This helps diagnose NTP failures caused by DNS issues.
+ * Called during init to verify the NTP server hostname can be resolved.
+ *
+ * @param hostname The hostname to resolve (e.g., "pool.ntp.org")
+ */
+static void log_dns_resolution(const char *hostname)
+{
+    struct addrinfo hints = {0};
+    hints.ai_family = AF_INET;
+    struct addrinfo *res = NULL;
+
+    ESP_LOGI(TAG, "Resolving hostname: %s", hostname);
+    int err = getaddrinfo(hostname, NULL, &hints, &res);
+
+    if (err == 0 && res) {
+        struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
+        ESP_LOGI(TAG, "DNS resolved: %s -> %s", hostname, inet_ntoa(addr->sin_addr));
+        freeaddrinfo(res);
+    } else {
+        ESP_LOGE(TAG, "DNS resolution FAILED for %s (error: %d)", hostname, err);
+        ESP_LOGE(TAG, "  Check: Is WiFi connected? Is DNS server configured?");
+    }
+}
+
+/**
+ * @brief FreeRTOS task to monitor SNTP sync status periodically
+ *
+ * Runs every 10 seconds until NTP sync succeeds or 2 minutes elapse.
+ * Logs helpful diagnostic info on each check and on timeout.
+ */
+static void sntp_status_monitor_task(void *pvParameters)
+{
+    int check_count = 0;
+    const int max_checks = 12;  /* 12 checks * 10 seconds = 2 minutes */
+
+    /* Wait 5 seconds for WiFi to connect before first check */
+    ESP_LOGI(TAG, "Monitor task: waiting 5s for WiFi to connect...");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    /* Set public DNS server (router DNS often doesn't work) */
+    set_public_dns();
+
+    /* Restart SNTP to use the new DNS server */
+    if (esp_sntp_enabled()) {
+        ESP_LOGI(TAG, "Restarting SNTP to use new DNS server...");
+        esp_sntp_restart();
+    }
+
+    /* Test DNS resolution now that WiFi should be connected */
+    log_dns_resolution(CONFIG_MIBUDDY_NTP_SERVER);
+
+    while (!s_is_synced && check_count < max_checks) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        check_count++;
+
+        sntp_sync_status_t status = sntp_get_sync_status();
+        const char *status_str;
+        switch (status) {
+            case SNTP_SYNC_STATUS_RESET:       status_str = "RESET (not synced)"; break;
+            case SNTP_SYNC_STATUS_COMPLETED:   status_str = "COMPLETED"; break;
+            case SNTP_SYNC_STATUS_IN_PROGRESS: status_str = "IN_PROGRESS"; break;
+            default:                           status_str = "UNKNOWN"; break;
+        }
+
+        ESP_LOGI(TAG, "[Check %d/%d] SNTP status: %s, enabled: %s",
+            check_count, max_checks, status_str,
+            esp_sntp_enabled() ? "YES" : "NO");
+
+        /* On reset status, log network info for debugging */
+        if (status == SNTP_SYNC_STATUS_RESET) {
+            esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            if (netif) {
+                esp_netif_ip_info_t ip_info;
+                if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+                    ESP_LOGI(TAG, "  Network: IP=" IPSTR ", GW=" IPSTR,
+                        IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
+                }
+                esp_netif_dns_info_t dns_info;
+                if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info) == ESP_OK) {
+                    ESP_LOGI(TAG, "  DNS: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
+                }
+            }
+        }
+    }
+
+    if (!s_is_synced) {
+        ESP_LOGE(TAG, "========================================");
+        ESP_LOGE(TAG, "NTP SYNC TIMEOUT after %d seconds!", check_count * 10);
+        ESP_LOGE(TAG, "Possible causes:");
+        ESP_LOGE(TAG, "  - DNS cannot resolve %s", CONFIG_MIBUDDY_NTP_SERVER);
+        ESP_LOGE(TAG, "  - UDP port 123 blocked by firewall");
+        ESP_LOGE(TAG, "  - NTP server unreachable from network");
+        ESP_LOGE(TAG, "  - Try: idf.py menuconfig -> change NTP server");
+        ESP_LOGE(TAG, "========================================");
+    } else {
+        ESP_LOGI(TAG, "SNTP monitor task completed - sync successful");
+    }
+
+    vTaskDelete(NULL);
+}
 
 /**
  * @brief Convert SNTP sync status to string for logging
@@ -140,13 +284,10 @@ static void time_sync_notification_cb(struct timeval *tv)
 
 void time_sync_init(time_sync_callback_t callback)
 {
-    printf("\n\n=== TIME_SYNC_INIT CALLED ===\n\n");  /* Debug: printf bypasses log level */
-    ESP_LOGI(TAG, ">>> time_sync_init() called <<<");
-
-    s_callback = callback;
-
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "Initializing time sync module");
+
+    s_callback = callback;
 #ifdef CONFIG_MIBUDDY_NTP_SERVER
     ESP_LOGI(TAG, "Timezone: %s", CONFIG_MIBUDDY_TIMEZONE);
     ESP_LOGI(TAG, "NTP Server: %s", CONFIG_MIBUDDY_NTP_SERVER);
@@ -184,18 +325,45 @@ void time_sync_init(time_sync_callback_t callback)
     ESP_LOGI(TAG, "Initial SNTP sync status: %s", sntp_sync_status_to_str(sync_status));
     ESP_LOGI(TAG, "SNTP enabled: %s", esp_sntp_enabled() ? "YES" : "NO");
     ESP_LOGI(TAG, "SNTP initialized, waiting for WiFi connection...");
+
+    /* Start background task to monitor SNTP sync progress
+     * DNS resolution test is done in the task after WiFi connects */
+    BaseType_t task_ret = xTaskCreate(
+        sntp_status_monitor_task,
+        "sntp_monitor",
+        4096,
+        NULL,
+        5,
+        NULL
+    );
+    if (task_ret != pdPASS) {
+        ESP_LOGW(TAG, "Failed to create SNTP monitor task");
+    } else {
+        ESP_LOGI(TAG, "SNTP monitor task started (will log status every 10s)");
+    }
 }
 
 bool time_sync_now(void)
 {
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Manual time sync requested");
+
+    /* Log current state */
+    sntp_sync_status_t status = sntp_get_sync_status();
+    ESP_LOGI(TAG, "Current SNTP status: %s", sntp_sync_status_to_str(status));
+    ESP_LOGI(TAG, "Already synced: %s", s_is_synced ? "YES" : "NO");
+
     /* Check if SNTP is initialized */
     if (esp_sntp_enabled()) {
-        ESP_LOGI(TAG, "Triggering manual time sync");
+        ESP_LOGI(TAG, "Restarting SNTP client...");
         esp_sntp_restart();
+        ESP_LOGI(TAG, "SNTP restart triggered, waiting for callback...");
+        ESP_LOGI(TAG, "========================================");
         return true;
     }
 
-    ESP_LOGW(TAG, "SNTP not initialized, cannot sync");
+    ESP_LOGE(TAG, "SNTP not enabled! Was time_sync_init() called?");
+    ESP_LOGI(TAG, "========================================");
     return false;
 }
 

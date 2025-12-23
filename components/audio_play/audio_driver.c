@@ -17,6 +17,7 @@
 
 #include "audio_driver.h"
 #include "string.h"
+#include "errno.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -56,6 +57,7 @@ typedef struct {
 #define QUEUE_LENGTH 5  /**< Maximum queued commands */
 
 static QueueHandle_t cmd_queue = NULL;  /**< Command queue handle */
+static bool audio_initialized = false;   /**< Initialization flag to prevent double init */
 
 /*===========================================================================
  * Power Amplifier Control
@@ -105,7 +107,13 @@ void player_task(void *pvParameters)
 
                 case CMD_PLAY: {
                     /* Start playing a new file */
-                    printf("Command received: Play <%s>\n", msg.url);
+                    ESP_LOGD(TAG, "Play: %s", msg.url);
+
+                    if (handle == NULL) {
+                        ESP_LOGD(TAG, "Audio player not initialized");
+                        break;
+                    }
+
                     Audio_PA_DIS();                              /* Disable amp during transition */
                     esp_audio_simple_player_stop(handle);        /* Stop any current playback */
 
@@ -127,7 +135,8 @@ void player_task(void *pvParameters)
                     lvgl_port_unlock();
 
                     if (audio_file == NULL) {
-                        printf("Failed to open audio file: %s\n", file_path);
+                        /* Silently skip - file may not exist, this is expected */
+                        ESP_LOGD(TAG, "Audio file not found: %s", file_path);
                         break;
                     }
 
@@ -139,8 +148,10 @@ void player_task(void *pvParameters)
 
                 case CMD_STOP:
                     /* Stop playback completely */
-                    printf("Command received: Stop\n");
-                    esp_audio_simple_player_stop(handle);
+                    ESP_LOGD(TAG, "Stop");
+                    if (handle != NULL) {
+                        esp_audio_simple_player_stop(handle);
+                    }
                     /* Close audio file */
                     if (audio_file != NULL) {
                         fclose(audio_file);
@@ -151,15 +162,19 @@ void player_task(void *pvParameters)
 
                 case CMD_PAUSE:
                     /* Pause current playback (can resume later) */
-                    printf("Command received: Pause\n");
+                    ESP_LOGD(TAG, "Pause");
                     Audio_PA_DIS();  /* Disable amp during pause */
-                    esp_audio_simple_player_pause(handle);
+                    if (handle != NULL) {
+                        esp_audio_simple_player_pause(handle);
+                    }
                     break;
 
                 case CMD_RESUME:
                     /* Resume paused playback */
-                    printf("Command received: Resume\n");
-                    esp_audio_simple_player_resume(handle);
+                    ESP_LOGD(TAG, "Resume");
+                    if (handle != NULL) {
+                        esp_audio_simple_player_resume(handle);
+                    }
                     Audio_PA_EN();  /* Re-enable amp */
                     break;
 
@@ -172,14 +187,18 @@ void player_task(void *pvParameters)
                         fclose(audio_file);
                         audio_file = NULL;
                     }
-                    esp_audio_simple_player_destroy(handle);
+                    if (handle != NULL) {
+                        esp_audio_simple_player_destroy(handle);
+                        handle = NULL;
+                    }
                     vQueueDelete(cmd_queue);
                     cmd_queue = NULL;
+                    audio_initialized = false;
                     vTaskDelete(NULL);  /* Delete this task */
                     break;
 
                 default:
-                    printf("Unknown command\n");
+                    ESP_LOGD(TAG, "Unknown command");
                     break;
             }
         }
@@ -317,7 +336,16 @@ static void pipeline_init(void)
 
     /* Create player and register event callback */
     esp_gmf_err_t err = esp_audio_simple_player_new(&cfg, &handle);
+    if (err != ESP_GMF_ERR_OK || handle == NULL) {
+        ESP_LOGE(TAG, "Failed to create audio player: err=%d, handle=%p", err, (void*)handle);
+        return;
+    }
+    ESP_LOGI(TAG, "Audio player created: handle=%p", (void*)handle);
+
     err = esp_audio_simple_player_set_event(handle, mock_event_callback, NULL);
+    if (err != ESP_GMF_ERR_OK) {
+        ESP_LOGW(TAG, "Failed to set event callback: %d", err);
+    }
 }
 
 /**
@@ -348,13 +376,15 @@ static void pipeline_deinit(void)
  */
 esp_gmf_err_t Audio_Play_Music(const char* url)
 {
-    esp_gmf_err_t err = ESP_GMF_ERR_OK;
+    if (cmd_queue == NULL || url == NULL) {
+        return ESP_GMF_ERR_INVALID_ARG;
+    }
     player_queue_t msg;
     memset(&msg, 0, sizeof(msg));
     msg.cmd = CMD_PLAY;
     memcpy(msg.url, url, strlen(url));
     xQueueSend(cmd_queue, &msg, portMAX_DELAY);
-    return err;
+    return ESP_GMF_ERR_OK;
 }
 
 /**
@@ -366,11 +396,13 @@ esp_gmf_err_t Audio_Play_Music(const char* url)
  */
 esp_gmf_err_t Audio_Stop_Play(void)
 {
-    esp_gmf_err_t err = ESP_GMF_ERR_OK;
+    if (cmd_queue == NULL) {
+        return ESP_GMF_ERR_OK;  /* Not initialized yet, nothing to stop */
+    }
     player_queue_t msg;
     msg.cmd = CMD_STOP;
     xQueueSend(cmd_queue, &msg, portMAX_DELAY);
-    return err;
+    return ESP_GMF_ERR_OK;
 }
 
 /**
@@ -382,11 +414,13 @@ esp_gmf_err_t Audio_Stop_Play(void)
  */
 esp_gmf_err_t Audio_Resume_Play(void)
 {
-    esp_gmf_err_t err = ESP_GMF_ERR_OK;
+    if (cmd_queue == NULL) {
+        return ESP_GMF_ERR_OK;
+    }
     player_queue_t msg;
     msg.cmd = CMD_RESUME;
     xQueueSend(cmd_queue, &msg, portMAX_DELAY);
-    return err;
+    return ESP_GMF_ERR_OK;
 }
 
 /**
@@ -398,11 +432,13 @@ esp_gmf_err_t Audio_Resume_Play(void)
  */
 esp_gmf_err_t Audio_Pause_Play(void)
 {
-    esp_gmf_err_t err = ESP_GMF_ERR_OK;
+    if (cmd_queue == NULL) {
+        return ESP_GMF_ERR_OK;
+    }
     player_queue_t msg;
     msg.cmd = CMD_PAUSE;
     xQueueSend(cmd_queue, &msg, portMAX_DELAY);
-    return err;
+    return ESP_GMF_ERR_OK;
 }
 
 /**
@@ -412,6 +448,9 @@ esp_gmf_err_t Audio_Pause_Play(void)
  */
 esp_asp_state_t Audio_Get_Current_State(void)
 {
+    if (handle == NULL) {
+        return ESP_ASP_STATE_STOPPED;
+    }
     esp_asp_state_t state;
     esp_gmf_err_t err = esp_audio_simple_player_get_state(handle, &state);
     if (err != ESP_GMF_ERR_OK) {
@@ -435,10 +474,16 @@ esp_asp_state_t Audio_Get_Current_State(void)
  */
 void Audio_Play_Init(void)
 {
+    /* Prevent double initialization */
+    if (audio_initialized) {
+        ESP_LOGI(TAG, "Audio already initialized, skipping");
+        return;
+    }
+
     /* Create command queue for player task */
     cmd_queue = xQueueCreate(QUEUE_LENGTH, sizeof(player_queue_t));
     if (cmd_queue == NULL) {
-        printf("Failed to create command queue\n");
+        ESP_LOGE(TAG, "Failed to create command queue");
         return;
     }
 
@@ -455,6 +500,9 @@ void Audio_Play_Init(void)
     /* Initialize audio pipeline and start player task */
     pipeline_init();
     xTaskCreate(player_task, "player_task", 2048, NULL, 5, &xHandle);
+
+    audio_initialized = true;
+    ESP_LOGI(TAG, "Audio playback system initialized");
 }
 
 /**

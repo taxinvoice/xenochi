@@ -21,6 +21,7 @@
 
 #include "app_mibuddy_assets.h"
 #include "mochi_state.h"
+#include "audio_driver.h"
 
 extern "C" {
 #include "lvgl_mibuddy.h"
@@ -123,6 +124,9 @@ bool PhoneMiBuddyConf::run(void)
     /* Reset state and activity index */
     s_current_state = 0;
     s_current_activity = 0;
+
+    /* Initialize audio system before mochi (which may play sounds) */
+    Audio_Play_Init();
 
     /* Initialize and create mochi avatar
      * Note: Asset setup callback is registered in main.cpp and called during mochi_init()

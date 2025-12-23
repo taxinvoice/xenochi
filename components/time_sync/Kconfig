@@ -25,4 +25,15 @@ menu "MiBuddy Time Sync Configuration"
         help
             Automatically sync time when WiFi connection is established.
 
+    config MIBUDDY_PUBLIC_DNS
+        string "Public DNS Server (fallback)"
+        default "1.1.1.1"
+        help
+            Public DNS server to use if router DNS fails.
+            Set to empty string to use only router-provided DNS.
+            Common options:
+            - 1.1.1.1 (Cloudflare)
+            - 8.8.8.8 (Google)
+            - 9.9.9.9 (Quad9)
+
 endmenu

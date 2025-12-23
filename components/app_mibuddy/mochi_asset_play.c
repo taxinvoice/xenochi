@@ -54,17 +54,17 @@ esp_err_t mochi_play_asset_sound(const mochi_sound_asset_t *asset, bool loop)
             return ESP_ERR_INVALID_ARG;
         }
 
-        /* Build full path */
+        /* Build full path - file:// URL needs 3 slashes for absolute paths */
         char full_path[128];
         if (asset->sd_path[0] == '/') {
             /* Already absolute path */
-            snprintf(full_path, sizeof(full_path), "file:/%s", asset->sd_path);
+            snprintf(full_path, sizeof(full_path), "file://%s", asset->sd_path);
         } else {
             /* Relative to Sounds folder */
-            snprintf(full_path, sizeof(full_path), "file:/" MOCHI_SD_SOUNDS_PATH "%s", asset->sd_path);
+            snprintf(full_path, sizeof(full_path), "file://" MOCHI_SD_SOUNDS_PATH "%s", asset->sd_path);
         }
 
-        ESP_LOGI(TAG, "Playing SD sound: %s", full_path);
+        ESP_LOGD(TAG, "Playing SD sound: %s", full_path);
         return Audio_Play_Music(full_path);
     }
 
