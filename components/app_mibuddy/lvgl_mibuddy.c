@@ -15,11 +15,26 @@
 
 static const char *TAG = "mibuddy";
 
-/* Declare the embedded wallpaper image for testing */
+/* Declare embedded images for slideshow */
 LV_IMAGE_DECLARE(esp_brookesia_image_small_wallpaper_dark_240_240);
+LV_IMAGE_DECLARE(img_lv_demo_music_cover_1);
+LV_IMAGE_DECLARE(img_lv_demo_music_cover_2);
+LV_IMAGE_DECLARE(img_lv_demo_music_cover_3);
 
-/* Flag to show embedded test image first */
-static bool s_show_embedded_first = true;
+/* Array of embedded images to show before SD card images */
+static const lv_image_dsc_t *s_embedded_images[] = {
+    &esp_brookesia_image_small_wallpaper_dark_240_240,
+    &img_lv_demo_music_cover_1,
+    &img_lv_demo_music_cover_2,
+    &img_lv_demo_music_cover_3,
+};
+#define NUM_EMBEDDED_IMAGES (sizeof(s_embedded_images) / sizeof(s_embedded_images[0]))
+
+/* Index for cycling through embedded images first */
+static uint8_t s_embedded_index = 0;
+
+/* Flag to track if slideshow is active (set false on cleanup) */
+static bool s_slideshow_active = false;
 
 /* Maximum number of images to scan */
 #define MAX_IMAGES 50
@@ -76,6 +91,9 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
 {
     ESP_LOGI(TAG, "Creating MiBuddy slideshow UI");
 
+    /* Mark slideshow as inactive during setup */
+    s_slideshow_active = false;
+
     /* Cleanup any existing timer first (prevents multiple timers if reopened without cleanup) */
     if (s_slideshow_timer != NULL) {
         ESP_LOGW(TAG, "Deleting orphaned slideshow timer");
@@ -86,7 +104,7 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
     /* Reset state */
     s_current_index = 0;
     s_image_count = 0;
-    s_show_embedded_first = true;
+    s_embedded_index = 0;
 
     /* Scan SD card for image files (PNG, JPG, BMP, GIF) */
     scan_images();
@@ -131,6 +149,9 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
     if (s_slideshow_timer == NULL) {
         ESP_LOGE(TAG, "Failed to create slideshow timer");
     }
+
+    /* Mark slideshow as active */
+    s_slideshow_active = true;
 }
 
 /**
@@ -139,6 +160,9 @@ void lvgl_mibuddy_create(lv_obj_t *parent)
 void lvgl_mibuddy_cleanup(void)
 {
     ESP_LOGI(TAG, "Cleaning up MiBuddy resources");
+
+    /* Mark slideshow as inactive first to stop timer callback */
+    s_slideshow_active = false;
 
     /* Delete the slideshow timer */
     if (s_slideshow_timer != NULL) {
@@ -150,7 +174,7 @@ void lvgl_mibuddy_cleanup(void)
     s_img_obj = NULL;
     s_info_label = NULL;
     s_current_index = 0;
-    s_show_embedded_first = true;  /* Reset to show embedded image first on next open */
+    s_embedded_index = 0;  /* Reset to show embedded images first on next open */
 }
 
 /*===========================================================================
@@ -207,17 +231,19 @@ static void display_current_image(void)
         return;
     }
 
-    /* Show embedded test image first to verify display works */
-    if (s_show_embedded_first) {
-        ESP_LOGI(TAG, "Displaying embedded wallpaper (240x240) as test");
-        lv_image_set_src(s_img_obj, &esp_brookesia_image_small_wallpaper_dark_240_240);
-        s_show_embedded_first = false;  /* Only show once */
+    /* Show embedded images first before SD card images */
+    if (s_embedded_index < NUM_EMBEDDED_IMAGES) {
+        ESP_LOGI(TAG, "Displaying embedded image [%d/%d]",
+                 s_embedded_index + 1, (int)NUM_EMBEDDED_IMAGES);
+        lv_image_set_src(s_img_obj, s_embedded_images[s_embedded_index]);
         return;
     }
 
-    /* No SD card images available */
+    /* No SD card images available - loop back to embedded images */
     if (s_image_count == 0) {
-        ESP_LOGW(TAG, "No SD card images to display");
+        ESP_LOGI(TAG, "No SD card images, looping embedded images");
+        s_embedded_index = 0;
+        lv_image_set_src(s_img_obj, s_embedded_images[s_embedded_index]);
         return;
     }
 
@@ -265,9 +291,9 @@ static void display_current_image(void)
  */
 static void slideshow_timer_cb(lv_timer_t *timer)
 {
-    /* Safety check: if image object was destroyed, stop the timer */
-    if (s_img_obj == NULL) {
-        ESP_LOGW(TAG, "Timer callback: img_obj is NULL, deleting orphaned timer");
+    /* Check if slideshow is still active */
+    if (!s_slideshow_active) {
+        ESP_LOGW(TAG, "Timer callback: slideshow inactive, deleting timer");
         if (timer != NULL) {
             lv_timer_delete(timer);
         }
@@ -275,12 +301,31 @@ static void slideshow_timer_cb(lv_timer_t *timer)
         return;
     }
 
-    if (s_image_count == 0) {
+    /* Safety check: if image object was destroyed, stop the timer */
+    if (s_img_obj == NULL) {
+        ESP_LOGW(TAG, "Timer callback: img_obj is NULL, deleting timer");
+        s_slideshow_active = false;
+        if (timer != NULL) {
+            lv_timer_delete(timer);
+        }
+        s_slideshow_timer = NULL;
         return;
     }
 
-    /* Advance to next image, loop back to first */
-    s_current_index = (s_current_index + 1) % s_image_count;
+    /* Advance through embedded images first */
+    if (s_embedded_index < NUM_EMBEDDED_IMAGES) {
+        s_embedded_index++;
+        display_current_image();
+        return;
+    }
+
+    /* Then advance through SD card images */
+    if (s_image_count > 0) {
+        s_current_index = (s_current_index + 1) % s_image_count;
+    } else {
+        /* No SD card images, advance embedded index (will wrap in display_current_image) */
+        s_embedded_index++;
+    }
 
     /* Display the new image */
     display_current_image();

@@ -62,4 +62,22 @@ protected:
      * @return true on success
      */
     bool close(void) override;
+
+    /**
+     * @brief Called when the app is paused (switching to another app)
+     *
+     * Stops the slideshow timer while app is in background.
+     *
+     * @return true on success
+     */
+    bool pause(void) override;
+
+    /**
+     * @brief Called when the app is resumed from pause
+     *
+     * Restarts the slideshow timer.
+     *
+     * @return true on success
+     */
+    bool resume(void) override;
 };

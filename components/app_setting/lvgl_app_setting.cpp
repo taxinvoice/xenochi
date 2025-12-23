@@ -643,6 +643,7 @@ bool PhoneSettingConf::run(void)
         40,               /*13: Backlight slider*/
         LV_GRID_CONTENT,  /*14: Logging label*/
         35,               /*15: Logging controls*/
+        30,               /*16: Bottom padding/gap*/
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -683,6 +684,15 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 15, 1);
     lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 15, 1);
     lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 15, 1);
+
+    // Bottom separator line (row 16) - creates gap at bottom of settings
+    lv_obj_t *bottom_line = lv_obj_create(panel1);
+    lv_obj_set_size(bottom_line, LV_PCT(100), 2);
+    lv_obj_set_style_bg_color(bottom_line, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_bg_opa(bottom_line, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(bottom_line, 0, 0);
+    lv_obj_set_style_radius(bottom_line, 0, 0);
+    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 16, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 

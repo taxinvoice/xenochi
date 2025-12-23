@@ -104,11 +104,45 @@ bool PhoneMiBuddyConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
 
+    /* Cleanup slideshow resources FIRST before notifying core */
+    lvgl_mibuddy_cleanup();
+
     /* Notify core that app is closing */
     ESP_BROOKESIA_CHECK_FALSE_RETURN(notifyCoreClosed(), false, "Notify core closed failed");
 
-    /* Cleanup slideshow resources */
+    return true;
+}
+
+/**
+ * @brief Called when the app is paused (e.g., switching to another app)
+ *
+ * Stops the slideshow timer while app is in background.
+ *
+ * @return true on success
+ */
+bool PhoneMiBuddyConf::pause(void)
+{
+    ESP_BROOKESIA_LOGD("Pause");
+
+    /* Stop slideshow when app is paused */
     lvgl_mibuddy_cleanup();
+
+    return true;
+}
+
+/**
+ * @brief Called when the app is resumed from pause
+ *
+ * Restarts the slideshow timer.
+ *
+ * @return true on success
+ */
+bool PhoneMiBuddyConf::resume(void)
+{
+    ESP_BROOKESIA_LOGD("Resume");
+
+    /* Restart slideshow when app is resumed */
+    lvgl_mibuddy_create(lv_screen_active());
 
     return true;
 }
