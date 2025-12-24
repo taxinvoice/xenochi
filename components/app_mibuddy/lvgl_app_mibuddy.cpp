@@ -389,7 +389,6 @@ static lv_obj_t *s_debug_overlay = NULL;
 static lv_obj_t *s_debug_orient_label = NULL;
 static lv_obj_t *s_debug_motion_label = NULL;
 static lv_obj_t *s_debug_angles_label = NULL;
-static lv_obj_t *s_debug_status_label = NULL;
 static lv_obj_t *s_debug_calc_label = NULL;
 
 static void create_debug_overlay(lv_obj_t *parent) {
@@ -437,12 +436,6 @@ static void create_debug_overlay(lv_obj_t *parent) {
     lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
     lv_label_set_text(s_debug_angles_label, "P:0 R:0");
 
-    /* Status label - bottom right (above nav bar) */
-    s_debug_status_label = lv_label_create(s_debug_overlay);
-    lv_obj_add_style(s_debug_status_label, &style_label, 0);
-    lv_obj_align(s_debug_status_label, LV_ALIGN_BOTTOM_RIGHT, -8, -45);
-    lv_label_set_text(s_debug_status_label, "STATUS");
-
     /* Send to back so face is visible on top */
     lv_obj_move_background(s_debug_overlay);
 }
@@ -453,7 +446,7 @@ static void update_debug_overlay(void) {
     const mochi_input_state_t *input = mochi_input_get();
     if (input == NULL) return;
 
-    static char buf[64];
+    static char buf[128];
 
     /* Orientation - show which direction */
     const char *orient = "-";
@@ -466,12 +459,11 @@ static void update_debug_overlay(void) {
     lv_label_set_text(s_debug_orient_label, orient);
 
     /* Calculated boolean flags - show abbreviation if true, dash if false */
-    /* TEMP DISABLED - debugging crash
     snprintf(buf, sizeof(buf),
         "%s %s %s\n"
         "%s %s %s\n"
         "%s %s %s\n"
-        "%lums",
+        "%.1fs",
         input->is_low_battery ? "LOW" : "---",
         input->is_moving ? "MOV" : "---",
         input->is_night ? "NGT" : "---",
@@ -481,9 +473,8 @@ static void update_debug_overlay(void) {
         input->is_idle ? "IDL" : "---",
         input->is_rotating ? "ROT" : "---",
         input->is_spinning ? "SPN" : "---",
-        (unsigned long)input->current_state_duration_ms);
+        input->current_state_duration_ms / 1000.0f);
     lv_label_set_text(s_debug_calc_label, buf);
-    */
 
     /* Motion flags */
     snprintf(buf, sizeof(buf), "%s%s%s%s",
@@ -499,13 +490,6 @@ static void update_debug_overlay(void) {
     lv_label_set_text(s_debug_angles_label, buf);
     lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
 
-    /* Status: battery, wifi, time */
-    snprintf(buf, sizeof(buf), "%s%s %s",
-             input->is_low_battery ? "LO" : (input->is_critical_battery ? "!!" : "OK"),
-             input->wifi_connected ? " W" : "",
-             input->is_night ? "N" : "D");
-    lv_label_set_text(s_debug_status_label, buf);
-    lv_obj_align(s_debug_status_label, LV_ALIGN_BOTTOM_RIGHT, -8, -45);
 }
 
 /**
@@ -646,7 +630,6 @@ bool PhoneMiBuddyConf::back(void)
     s_debug_orient_label = NULL;
     s_debug_motion_label = NULL;
     s_debug_angles_label = NULL;
-    s_debug_status_label = NULL;
     s_debug_calc_label = NULL;
 
     /* Reset state hold variables */
@@ -689,7 +672,6 @@ bool PhoneMiBuddyConf::close(void)
     s_debug_orient_label = NULL;
     s_debug_motion_label = NULL;
     s_debug_angles_label = NULL;
-    s_debug_status_label = NULL;
     s_debug_calc_label = NULL;
 
     /* Reset state hold variables */
