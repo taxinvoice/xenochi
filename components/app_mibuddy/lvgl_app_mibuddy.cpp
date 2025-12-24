@@ -310,6 +310,106 @@ static void update_state_label(void) {
     lv_label_set_text(s_state_label, label_buf);
 }
 
+/*===========================================================================
+ * Debug Overlay - Shows calculated input states
+ *===========================================================================*/
+
+static lv_obj_t *s_debug_overlay = NULL;
+static lv_obj_t *s_debug_orient_label = NULL;
+static lv_obj_t *s_debug_motion_label = NULL;
+static lv_obj_t *s_debug_angles_label = NULL;
+static lv_obj_t *s_debug_status_label = NULL;
+
+static void create_debug_overlay(lv_obj_t *parent) {
+    /* Create semi-transparent light container behind the face */
+    s_debug_overlay = lv_obj_create(parent);
+    lv_obj_remove_style_all(s_debug_overlay);
+    lv_obj_set_size(s_debug_overlay, 240, 284);
+    lv_obj_set_pos(s_debug_overlay, 0, 0);
+    lv_obj_set_style_bg_color(s_debug_overlay, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_debug_overlay, LV_OPA_40, 0);
+    lv_obj_clear_flag(s_debug_overlay, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    /* Common label style - dark text on light background */
+    static lv_style_t style_label;
+    static bool style_init = false;
+    if (!style_init) {
+        lv_style_init(&style_label);
+        lv_style_set_text_font(&style_label, &lv_font_montserrat_14);
+        lv_style_set_text_color(&style_label, lv_color_make(64, 64, 64));  /* Dark gray */
+        lv_style_set_text_opa(&style_label, LV_OPA_COVER);
+        style_init = true;
+    }
+
+    /* Orientation label - top left */
+    s_debug_orient_label = lv_label_create(s_debug_overlay);
+    lv_obj_add_style(s_debug_orient_label, &style_label, 0);
+    lv_obj_set_pos(s_debug_orient_label, 8, 45);
+    lv_label_set_text(s_debug_orient_label, "ORIENT");
+
+    /* Motion label - top right */
+    s_debug_motion_label = lv_label_create(s_debug_overlay);
+    lv_obj_add_style(s_debug_motion_label, &style_label, 0);
+    lv_obj_align(s_debug_motion_label, LV_ALIGN_TOP_RIGHT, -8, 45);
+    lv_label_set_text(s_debug_motion_label, "MOTION");
+
+    /* Angles label - bottom left (above nav bar) */
+    s_debug_angles_label = lv_label_create(s_debug_overlay);
+    lv_obj_add_style(s_debug_angles_label, &style_label, 0);
+    lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
+    lv_label_set_text(s_debug_angles_label, "P:0 R:0");
+
+    /* Status label - bottom right (above nav bar) */
+    s_debug_status_label = lv_label_create(s_debug_overlay);
+    lv_obj_add_style(s_debug_status_label, &style_label, 0);
+    lv_obj_align(s_debug_status_label, LV_ALIGN_BOTTOM_RIGHT, -8, -45);
+    lv_label_set_text(s_debug_status_label, "STATUS");
+
+    /* Send to back so face is visible on top */
+    lv_obj_move_background(s_debug_overlay);
+}
+
+static void update_debug_overlay(void) {
+    if (s_debug_overlay == NULL) return;
+
+    const mochi_input_state_t *input = mochi_input_get();
+    if (input == NULL) return;
+
+    static char buf[32];
+
+    /* Orientation - show which direction */
+    const char *orient = "-";
+    if (input->is_face_up) orient = "FACE UP";
+    else if (input->is_face_down) orient = "FACE DN";
+    else if (input->is_portrait) orient = "PORT";
+    else if (input->is_portrait_inv) orient = "PORT INV";
+    else if (input->is_landscape_left) orient = "LAND L";
+    else if (input->is_landscape_right) orient = "LAND R";
+    lv_label_set_text(s_debug_orient_label, orient);
+
+    /* Motion flags */
+    snprintf(buf, sizeof(buf), "%s%s%s%s",
+             input->is_moving ? "M" : "-",
+             input->is_shaking ? "S" : "-",
+             input->is_rotating ? "R" : "-",
+             input->is_spinning ? "X" : "-");
+    lv_label_set_text(s_debug_motion_label, buf);
+    lv_obj_align(s_debug_motion_label, LV_ALIGN_TOP_RIGHT, -8, 45);
+
+    /* Pitch and Roll angles */
+    snprintf(buf, sizeof(buf), "P:%+.0f R:%+.0f", input->pitch, input->roll);
+    lv_label_set_text(s_debug_angles_label, buf);
+    lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
+
+    /* Status: battery, wifi, time */
+    snprintf(buf, sizeof(buf), "%s%s %s",
+             input->is_low_battery ? "LO" : (input->is_critical_battery ? "!!" : "OK"),
+             input->wifi_connected ? " W" : "",
+             input->is_night ? "N" : "D");
+    lv_label_set_text(s_debug_status_label, buf);
+    lv_obj_align(s_debug_status_label, LV_ALIGN_BOTTOM_RIGHT, -8, -45);
+}
+
 /**
  * @brief Timer callback to update input state
  *
@@ -319,7 +419,8 @@ static void update_state_label(void) {
 static void input_timer_cb(lv_timer_t *t)
 {
     mochi_input_update();
-    update_state_label();  /* Update label after state change */
+    update_state_label();    /* Update label after state change */
+    update_debug_overlay();  /* Update debug overlay with input states */
 }
 
 /*===========================================================================
@@ -370,6 +471,9 @@ bool PhoneMiBuddyConf::run(void)
 
     /* Initialize audio system before mochi (which may play sounds) */
     Audio_Play_Init();
+
+    /* Create debug overlay FIRST so it's behind the mochi face */
+    create_debug_overlay(lv_screen_active());
 
     /* Initialize and create mochi avatar
      * Note: Asset setup callback is registered in main.cpp and called during mochi_init()
@@ -438,8 +542,13 @@ bool PhoneMiBuddyConf::back(void)
     /* Cleanup input system */
     mochi_input_deinit();
 
-    /* Reset label pointer (LVGL will delete it with screen) */
+    /* Reset UI pointers (LVGL will delete them with screen) */
     s_state_label = NULL;
+    s_debug_overlay = NULL;
+    s_debug_orient_label = NULL;
+    s_debug_motion_label = NULL;
+    s_debug_angles_label = NULL;
+    s_debug_status_label = NULL;
 
     /* Cleanup mochi resources before closing */
     mochi_deinit();
@@ -470,8 +579,13 @@ bool PhoneMiBuddyConf::close(void)
     /* Cleanup input system */
     mochi_input_deinit();
 
-    /* Reset label pointer (LVGL will delete it with screen) */
+    /* Reset UI pointers (LVGL will delete them with screen) */
     s_state_label = NULL;
+    s_debug_overlay = NULL;
+    s_debug_orient_label = NULL;
+    s_debug_motion_label = NULL;
+    s_debug_angles_label = NULL;
+    s_debug_status_label = NULL;
 
     /* Cleanup mochi resources FIRST before notifying core */
     mochi_deinit();
