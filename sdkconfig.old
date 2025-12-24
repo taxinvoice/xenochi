@@ -2229,6 +2229,36 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# MiBuddy Configuration
+#
+
+#
+# WiFi Settings
+#
+CONFIG_MIBUDDY_WIFI_SSID="xenier"
+CONFIG_MIBUDDY_WIFI_PASSWORD="0419335996"
+CONFIG_MIBUDDY_WIFI_RETRY_INTERVAL_MS=5000
+# end of WiFi Settings
+
+#
+# Time Sync Settings
+#
+CONFIG_MIBUDDY_NTP_SERVER="pool.ntp.org"
+CONFIG_MIBUDDY_TIMEZONE="UTC0"
+CONFIG_MIBUDDY_SYNC_ON_CONNECT=y
+CONFIG_MIBUDDY_PUBLIC_DNS="1.1.1.1"
+# end of Time Sync Settings
+
+#
+# Input & API Settings
+#
+CONFIG_MIBUDDY_INPUT_INTERVAL_MS=100
+CONFIG_MIBUDDY_API_URL="http://10.0.13.101:8080/mochi/state"
+CONFIG_MIBUDDY_STATE_HOLD_MS=1500
+# end of Input & API Settings
+# end of MiBuddy Configuration
+
+#
 # Net API Configuration
 #
 CONFIG_NET_API_TIMEOUT_MS=10000
@@ -2247,6 +2277,14 @@ CONFIG_NET_MQTT_TASK_STACK_SIZE=4096
 # end of Net MQTT Configuration
 
 #
+# Power Manager Configuration
+#
+CONFIG_POWER_SCREEN_OFF_TIMEOUT_SEC=60
+CONFIG_POWER_LIGHT_SLEEP_TIMEOUT_SEC=300
+CONFIG_POWER_MOTION_POLL_INTERVAL_MS=2000
+# end of Power Manager Configuration
+
+#
 # SD Card Logger Configuration
 #
 # CONFIG_SD_LOGGER_DEFAULT_ENABLED is not set
@@ -2254,23 +2292,6 @@ CONFIG_SD_LOGGER_MAX_FILE_SIZE_KB=1024
 CONFIG_SD_LOGGER_MAX_FILES=5
 CONFIG_SD_LOGGER_DIRECTORY="/sdcard/logs"
 # end of SD Card Logger Configuration
-
-#
-# MiBuddy Time Sync Configuration
-#
-CONFIG_MIBUDDY_NTP_SERVER="pool.ntp.org"
-CONFIG_MIBUDDY_TIMEZONE="UTC0"
-CONFIG_MIBUDDY_SYNC_ON_CONNECT=y
-CONFIG_MIBUDDY_PUBLIC_DNS="1.1.1.1"
-# end of MiBuddy Time Sync Configuration
-
-#
-# MiBuddy WiFi Configuration
-#
-CONFIG_MIBUDDY_WIFI_SSID="TelstraEF1CB3"
-CONFIG_MIBUDDY_WIFI_PASSWORD="not4PUBLICgates"
-CONFIG_MIBUDDY_WIFI_RETRY_INTERVAL_MS=5000
-# end of MiBuddy WiFi Configuration
 
 #
 # ESP Brookesia Configurations

@@ -298,11 +298,11 @@ static mochi_state_t s_held_state = MOCHI_STATE_HAPPY;
 static mochi_activity_t s_held_activity = MOCHI_ACTIVITY_IDLE;
 static uint32_t s_state_change_time = 0;
 
-/* State hold time from Kconfig (default 1500ms) */
+/* State hold time from Kconfig (default 0 = disabled) */
 #ifdef CONFIG_MIBUDDY_STATE_HOLD_MS
 static const uint32_t STATE_HOLD_MS = CONFIG_MIBUDDY_STATE_HOLD_MS;
 #else
-static const uint32_t STATE_HOLD_MS = 1500;
+static const uint32_t STATE_HOLD_MS = 0;
 #endif
 
 /**
@@ -699,6 +699,12 @@ bool PhoneMiBuddyConf::pause(void)
 {
     ESP_BROOKESIA_LOGD("Pause");
 
+    /* Stop input timer to disable state machine while paused */
+    if (s_input_timer) {
+        lv_timer_delete(s_input_timer);
+        s_input_timer = NULL;
+    }
+
     /* Pause mochi when app is paused */
     mochi_pause();
 
@@ -718,6 +724,11 @@ bool PhoneMiBuddyConf::resume(void)
 
     /* Resume mochi when app is resumed */
     mochi_resume();
+
+    /* Restart input timer for state machine */
+    if (s_input_timer == NULL) {
+        s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
+    }
 
     return true;
 }
