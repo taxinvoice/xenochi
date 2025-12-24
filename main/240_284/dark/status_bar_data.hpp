@@ -25,7 +25,7 @@ constexpr ESP_Brookesia_StatusBarData_t ESP_BROOKESIA_PHONE_240_284_DARK_STATUS_
             .size = ESP_BROOKESIA_STYLE_SIZE_RECT_PERCENT(100, 10),
             .size_min = ESP_BROOKESIA_STYLE_SIZE_RECT_W_PERCENT(100, 24),
             .size_max = ESP_BROOKESIA_STYLE_SIZE_RECT_W_PERCENT(100, 50),
-            .background_color = ESP_BROOKESIA_STYLE_COLOR_WITH_OPACITY(0x0,LV_OPA_0),
+            .background_color = ESP_BROOKESIA_STYLE_COLOR(0x1a1625),  /* Mochi Sakura theme bg */
             .text_font = ESP_BROOKESIA_STYLE_FONT_HEIGHT_PERCENT(60),
             .text_color = ESP_BROOKESIA_STYLE_COLOR(0xFFFFFF),
             

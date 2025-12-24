@@ -291,6 +291,77 @@ static void default_input_mapper(
 }
 
 /*===========================================================================
+ * State Hold Logic - Prevents jittery state changes
+ *===========================================================================*/
+
+static mochi_state_t s_held_state = MOCHI_STATE_HAPPY;
+static mochi_activity_t s_held_activity = MOCHI_ACTIVITY_IDLE;
+static uint32_t s_state_change_time = 0;
+
+/* State hold time from Kconfig (default 1500ms) */
+#ifdef CONFIG_MIBUDDY_STATE_HOLD_MS
+static const uint32_t STATE_HOLD_MS = CONFIG_MIBUDDY_STATE_HOLD_MS;
+#else
+static const uint32_t STATE_HOLD_MS = 1500;
+#endif
+
+/**
+ * @brief Get state priority (lower = higher priority, can interrupt)
+ */
+static int get_state_priority(mochi_state_t state) {
+    switch (state) {
+        case MOCHI_STATE_PANIC:   return 0;  /* Highest - always interrupts */
+        case MOCHI_STATE_DIZZY:   return 1;
+        case MOCHI_STATE_SHOCKED: return 2;
+        case MOCHI_STATE_WORRIED: return 3;
+        case MOCHI_STATE_SLEEPY:  return 4;
+        case MOCHI_STATE_EXCITED: return 5;
+        case MOCHI_STATE_COOL:    return 6;
+        case MOCHI_STATE_HAPPY:   return 7;  /* Lowest */
+        default: return 99;
+    }
+}
+
+/**
+ * @brief Wrapper mapper that applies state hold logic
+ *
+ * Calls the real mapper, then applies hold timer logic:
+ * - If hold time expired OR new state is higher priority: accept new state
+ * - Otherwise: keep the held state (prevents jitter)
+ */
+static void hold_wrapper_mapper(
+    const mochi_input_state_t *input,
+    mochi_state_t *out_state,
+    mochi_activity_t *out_activity)
+{
+    /* Get proposed state from real mapper */
+    mochi_state_t proposed_state;
+    mochi_activity_t proposed_activity;
+    default_input_mapper(input, &proposed_state, &proposed_activity);
+
+    /* Apply hold logic */
+    uint32_t now = lv_tick_get();
+    bool hold_expired = (STATE_HOLD_MS == 0) || ((now - s_state_change_time) >= STATE_HOLD_MS);
+    bool higher_priority = get_state_priority(proposed_state) < get_state_priority(s_held_state);
+
+    if (hold_expired || higher_priority) {
+        /* Accept the new state */
+        if (proposed_state != s_held_state || proposed_activity != s_held_activity) {
+            s_held_state = proposed_state;
+            s_held_activity = proposed_activity;
+            s_state_change_time = now;
+            ESP_LOGI("StateHold", "State changed: %s + %s (priority=%d, hold=%s)",
+                     mochi_state_name(s_held_state), mochi_activity_name(s_held_activity),
+                     get_state_priority(s_held_state), higher_priority ? "interrupted" : "expired");
+        }
+    }
+
+    /* Return the held state (prevents jitter when hold active) */
+    *out_state = s_held_state;
+    *out_activity = s_held_activity;
+}
+
+/*===========================================================================
  * State Label Display
  *===========================================================================*/
 
@@ -319,6 +390,7 @@ static lv_obj_t *s_debug_orient_label = NULL;
 static lv_obj_t *s_debug_motion_label = NULL;
 static lv_obj_t *s_debug_angles_label = NULL;
 static lv_obj_t *s_debug_status_label = NULL;
+static lv_obj_t *s_debug_calc_label = NULL;
 
 static void create_debug_overlay(lv_obj_t *parent) {
     /* Create semi-transparent light container behind the face */
@@ -346,6 +418,12 @@ static void create_debug_overlay(lv_obj_t *parent) {
     lv_obj_add_style(s_debug_orient_label, &style_label, 0);
     lv_obj_set_pos(s_debug_orient_label, 8, 45);
     lv_label_set_text(s_debug_orient_label, "ORIENT");
+
+    /* Calculated bools label - below orientation */
+    s_debug_calc_label = lv_label_create(s_debug_overlay);
+    lv_obj_add_style(s_debug_calc_label, &style_label, 0);
+    lv_obj_set_pos(s_debug_calc_label, 8, 65);
+    lv_label_set_text(s_debug_calc_label, "");
 
     /* Motion label - top right */
     s_debug_motion_label = lv_label_create(s_debug_overlay);
@@ -375,17 +453,37 @@ static void update_debug_overlay(void) {
     const mochi_input_state_t *input = mochi_input_get();
     if (input == NULL) return;
 
-    static char buf[32];
+    static char buf[64];
 
     /* Orientation - show which direction */
     const char *orient = "-";
-    if (input->is_face_up) orient = "FACE UP";
-    else if (input->is_face_down) orient = "FACE DN";
+    if (input->is_face_up) orient = "UP";
+    else if (input->is_face_down) orient = "DOWN";
     else if (input->is_portrait) orient = "PORT";
     else if (input->is_portrait_inv) orient = "PORT INV";
-    else if (input->is_landscape_left) orient = "LAND L";
-    else if (input->is_landscape_right) orient = "LAND R";
+    else if (input->is_landscape_left) orient = "LANDL";
+    else if (input->is_landscape_right) orient = "LANDR";
     lv_label_set_text(s_debug_orient_label, orient);
+
+    /* Calculated boolean flags - show abbreviation if true, dash if false */
+    /* TEMP DISABLED - debugging crash
+    snprintf(buf, sizeof(buf),
+        "%s %s %s\n"
+        "%s %s %s\n"
+        "%s %s %s\n"
+        "%lums",
+        input->is_low_battery ? "LOW" : "---",
+        input->is_moving ? "MOV" : "---",
+        input->is_night ? "NGT" : "---",
+        input->is_critical_battery ? "CRT" : "---",
+        input->is_shaking ? "SHK" : "---",
+        input->is_weekend ? "WKD" : "---",
+        input->is_idle ? "IDL" : "---",
+        input->is_rotating ? "ROT" : "---",
+        input->is_spinning ? "SPN" : "---",
+        (unsigned long)input->current_state_duration_ms);
+    lv_label_set_text(s_debug_calc_label, buf);
+    */
 
     /* Motion flags */
     snprintf(buf, sizeof(buf), "%s%s%s%s",
@@ -497,9 +595,9 @@ bool PhoneMiBuddyConf::run(void)
     /* Start with first state (Happy + Idle) */
     mochi_set(MOCHI_STATE_HAPPY, MOCHI_ACTIVITY_IDLE);
 
-    /* Initialize input system with default mapper */
+    /* Initialize input system with hold-wrapped mapper */
     mochi_input_init();
-    mochi_input_set_mapper_fn(default_input_mapper);
+    mochi_input_set_mapper_fn(hold_wrapper_mapper);
 
     /* Set API URL for remote decisions (from Kconfig) */
 #ifdef CONFIG_MIBUDDY_API_URL
@@ -549,6 +647,12 @@ bool PhoneMiBuddyConf::back(void)
     s_debug_motion_label = NULL;
     s_debug_angles_label = NULL;
     s_debug_status_label = NULL;
+    s_debug_calc_label = NULL;
+
+    /* Reset state hold variables */
+    s_held_state = MOCHI_STATE_HAPPY;
+    s_held_activity = MOCHI_ACTIVITY_IDLE;
+    s_state_change_time = 0;
 
     /* Cleanup mochi resources before closing */
     mochi_deinit();
@@ -586,6 +690,12 @@ bool PhoneMiBuddyConf::close(void)
     s_debug_motion_label = NULL;
     s_debug_angles_label = NULL;
     s_debug_status_label = NULL;
+    s_debug_calc_label = NULL;
+
+    /* Reset state hold variables */
+    s_held_state = MOCHI_STATE_HAPPY;
+    s_held_activity = MOCHI_ACTIVITY_IDLE;
+    s_state_change_time = 0;
 
     /* Cleanup mochi resources FIRST before notifying core */
     mochi_deinit();

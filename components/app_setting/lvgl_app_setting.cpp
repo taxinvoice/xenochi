@@ -36,6 +36,7 @@
 #include "wifi_manager.h"
 #include "time_sync.h"
 #include "sd_logger.h"
+#include "power_manager.h"
 
 using namespace std;
 using namespace esp_brookesia::gui;
@@ -77,6 +78,12 @@ static lv_timer_t* axp_timer = NULL;        /**< Battery status update timer */
 static lv_obj_t *logging_switch = NULL;     /**< Logging enable/disable switch */
 static lv_obj_t *logging_size_label = NULL; /**< Log size display label */
 static lv_obj_t *but_clear_logs = NULL;     /**< Clear logs button */
+
+/* Sleep settings UI elements */
+static lv_obj_t *screen_off_slider = NULL;  /**< Screen off timeout slider */
+static lv_obj_t *screen_off_value = NULL;   /**< Screen off timeout value label */
+static lv_obj_t *sleep_slider = NULL;       /**< Light sleep timeout slider */
+static lv_obj_t *sleep_value = NULL;        /**< Light sleep timeout value label */
 
 /* External PMU object from AXP2101 driver */
 extern XPowersPMU PMU;
@@ -424,6 +431,60 @@ static void clear_logs_btn_event_cb(lv_event_t *e)
 }
 
 /**
+ * @brief Update screen off timeout value display
+ */
+static void update_screen_off_value_label(uint32_t seconds)
+{
+    if (screen_off_value != NULL) {
+        char buf[16];
+        if (seconds >= 60) {
+            snprintf(buf, sizeof(buf), "%lum", seconds / 60);
+        } else {
+            snprintf(buf, sizeof(buf), "%lus", seconds);
+        }
+        lv_label_set_text(screen_off_value, buf);
+    }
+}
+
+/**
+ * @brief Update sleep timeout value display
+ */
+static void update_sleep_value_label(uint32_t seconds)
+{
+    if (sleep_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%lum", seconds / 60);
+        lv_label_set_text(sleep_value, buf);
+    }
+}
+
+/**
+ * @brief Screen off timeout slider change callback
+ *
+ * @param e LVGL event
+ */
+static void screen_off_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    uint32_t seconds = (uint32_t)lv_slider_get_value(slider);
+    power_manager_set_screen_off_timeout(seconds);
+    update_screen_off_value_label(seconds);
+}
+
+/**
+ * @brief Sleep timeout slider change callback
+ *
+ * @param e LVGL event
+ */
+static void sleep_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    uint32_t seconds = (uint32_t)lv_slider_get_value(slider);
+    power_manager_set_sleep_timeout(seconds);
+    update_sleep_value_label(seconds);
+}
+
+/**
  * @brief Update log size display label
  */
 static void update_log_size_display(void)
@@ -634,6 +695,33 @@ bool PhoneSettingConf::run(void)
     lv_obj_align(clear_logs_label, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(clear_logs_label, "Clear");
 
+    /* Sleep Settings section */
+    lv_obj_t * sleep_label = lv_label_create(panel1);
+    lv_label_set_text(sleep_label, "Sleep Settings (Face-down)");
+    lv_obj_add_style(sleep_label, &style_text_muted, 0);
+
+    /* Screen off timeout slider */
+    lv_obj_t * screen_off_label = lv_label_create(panel1);
+    lv_label_set_text(screen_off_label, "Screen off:");
+    screen_off_slider = lv_slider_create(panel1);
+    lv_obj_set_size(screen_off_slider, 100, 25);
+    lv_slider_set_range(screen_off_slider, 10, 600);
+    lv_slider_set_value(screen_off_slider, power_manager_get_screen_off_timeout(), LV_ANIM_OFF);
+    lv_obj_add_event_cb(screen_off_slider, screen_off_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    screen_off_value = lv_label_create(panel1);
+    update_screen_off_value_label(power_manager_get_screen_off_timeout());
+
+    /* Light sleep timeout slider */
+    lv_obj_t * sleep_timeout_label = lv_label_create(panel1);
+    lv_label_set_text(sleep_timeout_label, "Sleep:");
+    sleep_slider = lv_slider_create(panel1);
+    lv_obj_set_size(sleep_slider, 100, 25);
+    lv_slider_set_range(sleep_slider, 60, 1800);
+    lv_slider_set_value(sleep_slider, power_manager_get_sleep_timeout(), LV_ANIM_OFF);
+    lv_obj_add_event_cb(sleep_slider, sleep_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    sleep_value = lv_label_create(panel1);
+    update_sleep_value_label(power_manager_get_sleep_timeout());
+
     static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t grid_main_row_dsc[] = {LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
     lv_obj_set_grid_dsc_array(lv_screen_active(), grid_main_col_dsc, grid_main_row_dsc);
@@ -658,7 +746,10 @@ bool PhoneSettingConf::run(void)
         40,               /*15: Backlight slider*/
         LV_GRID_CONTENT,  /*16: Logging label*/
         35,               /*17: Logging controls*/
-        30,               /*18: Bottom padding/gap*/
+        LV_GRID_CONTENT,  /*18: Sleep Settings label*/
+        35,               /*19: Screen off slider row*/
+        35,               /*20: Sleep slider row*/
+        30,               /*21: Bottom padding/gap*/
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -704,14 +795,23 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 17, 1);
     lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 17, 1);
 
-    // Bottom separator line (row 18) - creates gap at bottom of settings
+    // Sleep Settings module (rows 18-20)
+    lv_obj_set_grid_cell(sleep_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 18, 1);
+    lv_obj_set_grid_cell(screen_off_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 19, 1);
+    lv_obj_set_grid_cell(screen_off_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 19, 1);
+    lv_obj_set_grid_cell(screen_off_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 19, 1);
+    lv_obj_set_grid_cell(sleep_timeout_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 20, 1);
+    lv_obj_set_grid_cell(sleep_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 20, 1);
+    lv_obj_set_grid_cell(sleep_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 20, 1);
+
+    // Bottom separator line (row 21) - creates gap at bottom of settings
     lv_obj_t *bottom_line = lv_obj_create(panel1);
     lv_obj_set_size(bottom_line, LV_PCT(100), 2);
     lv_obj_set_style_bg_color(bottom_line, lv_color_hex(0x333333), 0);
     lv_obj_set_style_bg_opa(bottom_line, LV_OPA_50, 0);
     lv_obj_set_style_border_width(bottom_line, 0, 0);
     lv_obj_set_style_radius(bottom_line, 0, 0);
-    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 18, 1);
+    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 21, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 

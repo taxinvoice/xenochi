@@ -40,6 +40,7 @@ static struct {
     char api_url[128];
     mochi_state_t last_state;
     mochi_activity_t last_activity;
+    int64_t state_change_time_us;  /* Timestamp when state last changed (microseconds) */
 } s_input = {
     .initialized = false,
     .state = {},
@@ -47,6 +48,7 @@ static struct {
     .api_url = {0},
     .last_state = MOCHI_STATE_HAPPY,
     .last_activity = MOCHI_ACTIVITY_IDLE,
+    .state_change_time_us = 0,
 };
 
 /*===========================================================================
@@ -225,6 +227,17 @@ static void compute_calculated_inputs(void)
     /* Weekend check */
     int dow = s_input.state.day_of_week;
     s_input.state.is_weekend = (dow == 0 || dow == 6);  /* Sunday or Saturday */
+
+    /* Idle detection - not moving and not rotating */
+    s_input.state.is_idle = !s_input.state.is_moving && !s_input.state.is_rotating;
+
+    /* State duration - time since last state change */
+    if (s_input.state_change_time_us == 0) {
+        s_input.state_change_time_us = esp_timer_get_time();
+    }
+    int64_t now_us = esp_timer_get_time();
+    int64_t duration_us = now_us - s_input.state_change_time_us;
+    s_input.state.current_state_duration_ms = (uint32_t)(duration_us / 1000);
 }
 
 /*===========================================================================
@@ -420,6 +433,7 @@ esp_err_t mochi_input_update(void)
         if (new_state != s_input.last_state || new_activity != s_input.last_activity) {
             s_input.last_state = new_state;
             s_input.last_activity = new_activity;
+            s_input.state_change_time_us = esp_timer_get_time();  /* Reset duration timer */
             mochi_set(new_state, new_activity);
         }
     }

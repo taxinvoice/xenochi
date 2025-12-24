@@ -18,6 +18,7 @@ idf_component_register(
         wifi_manager
         time_sync
         sd_logger
+        power_manager
         nvs_flash
         bsp_esp32_c6_touch_lcd_1_83
         esp-brookesia

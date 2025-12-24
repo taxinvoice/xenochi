@@ -171,17 +171,33 @@ static void Backlight_Init(void)
 }
 
 void bsp_set_backlight(uint8_t light)
-{   
+{
     if(light > Backlight_MAX) light = Backlight_MAX;
     uint16_t Duty = LEDC_MAX_Duty-(81*(Backlight_MAX-light));
-    if(light == 0) 
+    if(light == 0)
         Duty = 0;
     ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, Duty);
     ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel);
+    backlight = light;
 }
 
 
 uint8_t bsp_read_backlight_value(void)
 {
     return backlight;
+}
+
+void bsp_fade_backlight(uint8_t target, uint32_t duration_ms)
+{
+    if (target > Backlight_MAX) target = Backlight_MAX;
+
+    uint16_t target_duty = LEDC_MAX_Duty - (81 * (Backlight_MAX - target));
+    if (target == 0) {
+        target_duty = 0;
+    }
+
+    ledc_set_fade_with_time(LEDC_LS_MODE, LEDC_HS_CH0_CHANNEL, target_duty, duration_ms);
+    ledc_fade_start(LEDC_LS_MODE, LEDC_HS_CH0_CHANNEL, LEDC_FADE_NO_WAIT);
+
+    backlight = target;
 }

@@ -105,6 +105,12 @@ typedef struct {
     bool  is_night;              /**< hour in [22..6] */
     bool  is_weekend;            /**< Saturday or Sunday */
 
+    /* Idle detection */
+    bool  is_idle;               /**< Not moving and not rotating */
+
+    /* State duration */
+    uint32_t current_state_duration_ms;  /**< How long current mochi state has been active */
+
 } mochi_input_state_t;
 
 /*===========================================================================

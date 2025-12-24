@@ -1,25 +1,108 @@
 menu "MiBuddy Configuration"
 
-    config MIBUDDY_INPUT_INTERVAL_MS
-        int "Input mapper interval (ms)"
-        default 100
-        range 50 5000
-        help
-            How often the input system collects sensor data and runs the mapper.
-            Lower values = more responsive but higher CPU usage.
+    menu "WiFi Settings"
 
-            Common values:
-            - 50ms (20Hz) - Very responsive, high CPU
-            - 100ms (10Hz) - Default, good balance
-            - 500ms (2Hz) - Low power mode
-            - 1000ms (1Hz) - Very low power
+        config MIBUDDY_WIFI_SSID
+            string "WiFi SSID"
+            default "MyNetwork"
+            help
+                The SSID of the WiFi network to connect to on boot.
+                Set this to your WiFi network name.
 
-    config MIBUDDY_API_URL
-        string "API endpoint URL"
-        default "http://10.0.13.101:8080/mochi/state"
-        help
-            HTTP endpoint for remote state decisions.
-            The mochi will POST sensor data and receive state/activity response.
-            Set to empty string to disable API queries.
+        config MIBUDDY_WIFI_PASSWORD
+            string "WiFi Password"
+            default "password"
+            help
+                The password for the WiFi network.
+                Set this to your WiFi network password.
+
+        config MIBUDDY_WIFI_RETRY_INTERVAL_MS
+            int "Retry interval (ms)"
+            default 5000
+            help
+                Interval in milliseconds between WiFi reconnection attempts.
+                The device will retry forever until connected.
+
+    endmenu
+
+    menu "Time Sync Settings"
+
+        config MIBUDDY_NTP_SERVER
+            string "NTP Server"
+            default "pool.ntp.org"
+            help
+                Primary NTP server for time synchronization.
+                Common options: pool.ntp.org, time.google.com, time.cloudflare.com
+
+        config MIBUDDY_TIMEZONE
+            string "Timezone (POSIX format)"
+            default "UTC0"
+            help
+                Timezone in POSIX format. Examples:
+                - UTC0 (UTC, no offset)
+                - EST5EDT,M3.2.0,M11.1.0 (US Eastern with DST)
+                - PST8PDT,M3.2.0,M11.1.0 (US Pacific with DST)
+                - CST-8 (China Standard Time)
+                - GMT0BST,M3.5.0/1,M10.5.0 (UK with DST)
+                - CET-1CEST,M3.5.0,M10.5.0/3 (Central Europe with DST)
+
+        config MIBUDDY_SYNC_ON_CONNECT
+            bool "Sync time when WiFi connects"
+            default y
+            help
+                Automatically sync time when WiFi connection is established.
+
+        config MIBUDDY_PUBLIC_DNS
+            string "Public DNS Server (fallback)"
+            default "1.1.1.1"
+            help
+                Public DNS server to use if router DNS fails.
+                Set to empty string to use only router-provided DNS.
+                Common options:
+                - 1.1.1.1 (Cloudflare)
+                - 8.8.8.8 (Google)
+                - 9.9.9.9 (Quad9)
+
+    endmenu
+
+    menu "Input & API Settings"
+
+        config MIBUDDY_INPUT_INTERVAL_MS
+            int "Input mapper interval (ms)"
+            default 100
+            range 50 5000
+            help
+                How often the input system collects sensor data and runs the mapper.
+                Lower values = more responsive but higher CPU usage.
+
+                Common values:
+                - 50ms (20Hz) - Very responsive, high CPU
+                - 100ms (10Hz) - Default, good balance
+                - 500ms (2Hz) - Low power mode
+                - 1000ms (1Hz) - Very low power
+
+        config MIBUDDY_API_URL
+            string "API endpoint URL"
+            default "http://10.0.13.101:8080/mochi/state"
+            help
+                HTTP endpoint for remote state decisions.
+                The mochi will POST sensor data and receive state/activity response.
+                Set to empty string to disable API queries.
+
+        config MIBUDDY_STATE_HOLD_MS
+            int "State hold time (ms)"
+            default 1500
+            range 0 5000
+            help
+                Minimum time to stay in a state before allowing change.
+                Prevents jittery state transitions from sensor noise.
+
+                Set to 0 to disable (instant transitions).
+                Recommended: 1000-2000ms for smooth behavior.
+
+                Note: High-priority states (PANIC, DIZZY) can still
+                interrupt immediately regardless of this setting.
+
+    endmenu
 
 endmenu

@@ -37,6 +37,7 @@
 #include "wifi_manager.h"           /* WiFi auto-connect and status */
 #include "time_sync.h"              /* NTP time sync to RTC */
 #include "sd_logger.h"              /* SD card file logging */
+#include "power_manager.h"          /* Face-down sleep mode */
 
 #include "esp_heap_caps.h"
 
@@ -200,6 +201,14 @@ extern "C" void app_main(void)
      */
     sd_logger_init();
 
+    /* Initialize power manager
+     * - Monitors face-down orientation via IMU
+     * - Fades screen off after configurable timeout
+     * - Enters light sleep after extended face-down time
+     * - Wakes on touch or motion
+     */
+    power_manager_init();
+
     /*==========================================================================
      * PHASE 2: Content Discovery
      *=========================================================================*/
@@ -303,10 +312,21 @@ extern "C" void app_main(void)
      * - Virtual buddy that displays images from SD card
      * - Loads PNG images from /sdcard/Images/ folder
      * - Cycles through images every 2 seconds in a loop
+     * - Auto-launches as the startup app
      */
-    PhoneMiBuddyConf *app_mibuddy_conf = new PhoneMiBuddyConf(0, 0);
+    PhoneMiBuddyConf *app_mibuddy_conf = new PhoneMiBuddyConf(1, 0);
     ESP_BROOKESIA_CHECK_NULL_EXIT(app_mibuddy_conf, "Create app mibuddy failed");
-    ESP_BROOKESIA_CHECK_FALSE_EXIT((phone->installApp(app_mibuddy_conf) >= 0), "Install app mibuddy failed");
+    int mibuddy_app_id = phone->installApp(app_mibuddy_conf);
+    ESP_BROOKESIA_CHECK_FALSE_EXIT((mibuddy_app_id >= 0), "Install app mibuddy failed");
+
+    /* Auto-launch MiBuddy as startup app */
+    ESP_Brookesia_CoreAppEventData_t startup_event = {
+        .id = mibuddy_app_id,
+        .type = ESP_BROOKESIA_CORE_APP_EVENT_TYPE_START,
+        .data = nullptr
+    };
+    phone->sendAppEvent(&startup_event);
+    ESP_LOGI(TAG, "Auto-launched MiBuddy app (id=%d)", mibuddy_app_id);
 
     /*==========================================================================
      * PHASE 5: Background Services

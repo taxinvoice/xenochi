@@ -253,6 +253,13 @@ void bsp_set_backlight(uint8_t light);
  */
 uint8_t bsp_read_backlight_value(void);
 
+/**
+ * @brief Fade backlight to target brightness over duration
+ * @param target Target brightness level (0-100)
+ * @param duration_ms Fade duration in milliseconds
+ */
+void bsp_fade_backlight(uint8_t target, uint32_t duration_ms);
+
 /*===========================================================================
  * Touch Driver API
  *===========================================================================*/

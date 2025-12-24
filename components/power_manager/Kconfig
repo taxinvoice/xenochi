@@ -1,0 +1,27 @@
+menu "Power Manager Configuration"
+
+    config POWER_SCREEN_OFF_TIMEOUT_SEC
+        int "Screen off timeout when face-down (seconds)"
+        default 60
+        range 10 600
+        help
+            Time in seconds to wait before fading the screen off
+            when the device is placed face-down.
+
+    config POWER_LIGHT_SLEEP_TIMEOUT_SEC
+        int "Light sleep timeout when face-down (seconds)"
+        default 300
+        range 60 1800
+        help
+            Time in seconds to wait before entering light sleep
+            when the device is placed face-down (after screen is off).
+
+    config POWER_MOTION_POLL_INTERVAL_MS
+        int "Motion polling interval during light sleep (ms)"
+        default 2000
+        range 500 10000
+        help
+            How often to wake from light sleep to check if the device
+            has been picked up (accelerometer polling).
+
+endmenu
