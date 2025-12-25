@@ -29,8 +29,9 @@ typedef enum {
  * @brief Power manager configuration
  */
 typedef struct {
-    uint32_t screen_off_timeout_sec;   /**< Seconds face-down before screen off */
-    uint32_t light_sleep_timeout_sec;  /**< Seconds face-down before light sleep */
+    uint32_t screen_off_timeout_sec;       /**< Seconds face-down before screen off */
+    uint32_t light_sleep_timeout_sec;      /**< Seconds before light sleep (after screen off) */
+    uint32_t idle_screen_off_timeout_sec;  /**< Seconds idle before screen off */
 } power_manager_config_t;
 
 /**
@@ -88,6 +89,19 @@ uint32_t power_manager_get_screen_off_timeout(void);
  * @return Timeout in seconds
  */
 uint32_t power_manager_get_sleep_timeout(void);
+
+/**
+ * @brief Set idle screen-off timeout
+ * @param seconds Timeout in seconds (60-1800), 0 to disable
+ * @return ESP_OK on success
+ */
+esp_err_t power_manager_set_idle_timeout(uint32_t seconds);
+
+/**
+ * @brief Get idle screen-off timeout
+ * @return Timeout in seconds (0 = disabled)
+ */
+uint32_t power_manager_get_idle_timeout(void);
 
 /**
  * @brief Inhibit or allow sleep

@@ -357,6 +357,22 @@ int esp_get_feed_channel(void);
 char* esp_get_input_format(void);
 
 /*===========================================================================
+ * Battery API (AXP2101)
+ *===========================================================================*/
+
+/**
+ * @brief Get battery percentage
+ * @return Battery level 0-100%, or -1 if no battery connected
+ */
+int bsp_battery_get_percent(void);
+
+/**
+ * @brief Check if battery is charging
+ * @return true if charging, false otherwise
+ */
+bool bsp_battery_is_charging(void);
+
+/*===========================================================================
  * Board Initialization API
  *===========================================================================*/
 

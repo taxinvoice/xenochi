@@ -96,6 +96,118 @@ static void on_wifi_status_changed(bool connected, int rssi)
 }
 
 /**
+ * @brief Find battery icon images in the status bar and set their recolor
+ *
+ * Traverses the LVGL object tree to find the battery icon images
+ * in the status bar and updates their recolor based on battery level.
+ *
+ * @param parent The parent object to search in
+ * @param color The color to apply to the battery icon
+ */
+static void set_battery_icon_color_recursive(lv_obj_t *obj, lv_color_t color)
+{
+    if (obj == NULL) return;
+
+    /* Check if this is an image object */
+    if (lv_obj_check_type(obj, &lv_image_class)) {
+        lv_obj_set_style_img_recolor(obj, color, 0);
+        lv_obj_set_style_img_recolor_opa(obj, LV_OPA_COVER, 0);
+    }
+
+    /* Recurse into children */
+    uint32_t child_count = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < child_count; i++) {
+        set_battery_icon_color_recursive(lv_obj_get_child(obj, i), color);
+    }
+}
+
+/**
+ * @brief Find the battery icon container in the status bar
+ *
+ * The battery icon is in area 2 (right side) of the status bar.
+ * Status bar structure: main_obj -> area_objs[0,1,2] -> icons
+ * Battery icon is typically the first icon in area 2.
+ *
+ * @param status_bar_obj The status bar main object
+ * @return The battery icon container, or NULL if not found
+ */
+static lv_obj_t *find_battery_icon_container(lv_obj_t *status_bar_obj)
+{
+    if (status_bar_obj == NULL) return NULL;
+
+    /* Area 2 is the third child (index 2) of the status bar */
+    uint32_t child_count = lv_obj_get_child_count(status_bar_obj);
+    if (child_count < 3) return NULL;
+
+    lv_obj_t *area_2 = lv_obj_get_child(status_bar_obj, 2);
+    if (area_2 == NULL) return NULL;
+
+    /* Battery icon container is the first child of area 2 (per status_bar_data.hpp order) */
+    /* Actually, wifi is added first in beginWifi(), then battery in beginBattery() */
+    /* So battery is child index 1 (second child) */
+    child_count = lv_obj_get_child_count(area_2);
+    if (child_count < 1) return NULL;
+
+    /* Battery container is typically child 0 (first added to area 2) */
+    return lv_obj_get_child(area_2, 0);
+}
+
+/**
+ * @brief Timer callback to update battery status and icon color
+ *
+ * Updates the status bar battery icon:
+ * - Gets battery percentage from AXP2101 PMU
+ * - Updates the icon level via setBatteryPercent()
+ * - Changes icon color: RED (<5%), ORANGE (<20%), WHITE (normal)
+ *
+ * @param t LVGL timer handle containing the phone object as user_data
+ */
+static void on_battery_update_timer_cb(struct _lv_timer_t *t)
+{
+    ESP_Brookesia_Phone *phone = (ESP_Brookesia_Phone *)t->user_data;
+    if (phone == NULL) return;
+
+    /* Get battery status */
+    int battery_pct = bsp_battery_get_percent();
+    bool is_charging = bsp_battery_is_charging();
+
+    /* Use 100% if no battery connected (USB powered) */
+    if (battery_pct < 0) battery_pct = 100;
+
+    /* Update status bar battery icon level */
+    ESP_Brookesia_StatusBar *status_bar = phone->getHome().getStatusBar();
+    if (status_bar != NULL) {
+        status_bar->setBatteryPercent(is_charging, battery_pct);
+    }
+
+    /* Determine battery color based on level */
+    lv_color_t battery_color;
+    if (!is_charging && battery_pct < 5) {
+        battery_color = lv_color_hex(0xFF4444);  /* Red for critical */
+    } else if (!is_charging && battery_pct < 20) {
+        battery_color = lv_color_hex(0xFFA500);  /* Orange for low */
+    } else {
+        battery_color = lv_color_hex(0xFFFFFF);  /* White for normal */
+    }
+
+    /* Find and update battery icon color
+     * The status bar is the first child at y=0 on the active screen
+     */
+    lv_obj_t *screen = lv_screen_active();
+    if (screen == NULL) return;
+
+    /* Status bar should be the first child of the screen */
+    lv_obj_t *status_bar_obj = lv_obj_get_child(screen, 0);
+    if (status_bar_obj == NULL) return;
+
+    /* Find the battery icon container (in area 2) */
+    lv_obj_t *battery_container = find_battery_icon_container(status_bar_obj);
+    if (battery_container != NULL) {
+        set_battery_icon_color_recursive(battery_container, battery_color);
+    }
+}
+
+/**
  * @brief Timer callback to update the status bar clock display
  *
  * This callback is triggered every 1000ms to refresh the clock in the
@@ -338,6 +450,17 @@ extern "C" void app_main(void)
     ESP_BROOKESIA_CHECK_NULL_EXIT(
         lv_timer_create(on_clock_update_timer_cb, 1000, phone),
         "Create clock update timer failed"
+    );
+
+    /* Create 5-second timer to update battery status and icon color
+     * Updates battery percentage and changes color:
+     * - Red for critical (<5%)
+     * - Orange for low (<20%)
+     * - White for normal
+     */
+    ESP_BROOKESIA_CHECK_NULL_EXIT(
+        lv_timer_create(on_battery_update_timer_cb, 5000, phone),
+        "Create battery update timer failed"
     );
 
     /* Release LVGL mutex - UI is now ready and running */

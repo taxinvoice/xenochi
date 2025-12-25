@@ -22,6 +22,7 @@ static const char *TAG = "power_mgr";
 #define NVS_NAMESPACE       "power_mgr"
 #define NVS_KEY_SCREEN_OFF  "scrn_off"
 #define NVS_KEY_SLEEP       "sleep_sec"
+#define NVS_KEY_IDLE_OFF    "idle_off"
 
 /* Task configuration */
 #define POWER_TASK_STACK_SIZE   4096
@@ -37,6 +38,7 @@ static struct {
     power_state_t state;
     int64_t face_down_start_us;         /* When face-down started (0 = not face down) */
     int64_t screen_off_start_us;        /* When screen turned off */
+    int64_t last_activity_us;           /* Last touch/motion timestamp */
     bool sleep_inhibited;
     uint8_t saved_backlight;            /* Backlight level before turning off */
     power_manager_config_t config;
@@ -47,11 +49,13 @@ static struct {
     .state = POWER_STATE_ACTIVE,
     .face_down_start_us = 0,
     .screen_off_start_us = 0,
+    .last_activity_us = 0,
     .sleep_inhibited = false,
     .saved_backlight = DEFAULT_BACKLIGHT,
     .config = {
         .screen_off_timeout_sec = CONFIG_POWER_SCREEN_OFF_TIMEOUT_SEC,
         .light_sleep_timeout_sec = CONFIG_POWER_LIGHT_SLEEP_TIMEOUT_SEC,
+        .idle_screen_off_timeout_sec = CONFIG_POWER_IDLE_SCREEN_OFF_TIMEOUT_SEC,
     },
     .task_handle = NULL,
     .initialized = false,
@@ -83,14 +87,19 @@ static void load_config_from_nvs(void)
         if (nvs_get_u32(handle, NVS_KEY_SLEEP, &value) == ESP_OK) {
             s_pm.config.light_sleep_timeout_sec = value;
         }
+        if (nvs_get_u32(handle, NVS_KEY_IDLE_OFF, &value) == ESP_OK) {
+            s_pm.config.idle_screen_off_timeout_sec = value;
+        }
         nvs_close(handle);
-        ESP_LOGI(TAG, "Loaded config: screen_off=%lus, sleep=%lus",
+        ESP_LOGI(TAG, "Loaded config: screen_off=%lus, sleep=%lus, idle=%lus",
                  s_pm.config.screen_off_timeout_sec,
-                 s_pm.config.light_sleep_timeout_sec);
+                 s_pm.config.light_sleep_timeout_sec,
+                 s_pm.config.idle_screen_off_timeout_sec);
     } else {
-        ESP_LOGI(TAG, "Using default config: screen_off=%lus, sleep=%lus",
+        ESP_LOGI(TAG, "Using default config: screen_off=%lus, sleep=%lus, idle=%lus",
                  s_pm.config.screen_off_timeout_sec,
-                 s_pm.config.light_sleep_timeout_sec);
+                 s_pm.config.light_sleep_timeout_sec,
+                 s_pm.config.idle_screen_off_timeout_sec);
     }
 }
 
@@ -101,6 +110,7 @@ static void save_config_to_nvs(void)
     if (err == ESP_OK) {
         nvs_set_u32(handle, NVS_KEY_SCREEN_OFF, s_pm.config.screen_off_timeout_sec);
         nvs_set_u32(handle, NVS_KEY_SLEEP, s_pm.config.light_sleep_timeout_sec);
+        nvs_set_u32(handle, NVS_KEY_IDLE_OFF, s_pm.config.idle_screen_off_timeout_sec);
         nvs_commit(handle);
         nvs_close(handle);
         ESP_LOGI(TAG, "Saved config to NVS");
@@ -191,6 +201,7 @@ static void transition_to_active(void)
     s_pm.state = POWER_STATE_ACTIVE;
     s_pm.face_down_start_us = 0;
     s_pm.screen_off_start_us = 0;
+    s_pm.last_activity_us = esp_timer_get_time();
 }
 
 static void configure_wake_sources(void)
@@ -224,35 +235,61 @@ static void power_manager_task(void *arg)
 
         int64_t now_us = esp_timer_get_time();
 
+        /* Track activity - reset idle timer on touch or motion */
+        if (input->touch_active || input->is_moving) {
+            s_pm.last_activity_us = now_us;
+        }
+
         switch (s_pm.state) {
-            case POWER_STATE_ACTIVE:
+            case POWER_STATE_ACTIVE: {
+                bool should_screen_off = false;
+
+                /* Face-down trigger */
                 if (input->is_face_down) {
                     if (s_pm.face_down_start_us == 0) {
-                        /* Just went face-down */
                         s_pm.face_down_start_us = now_us;
                         ESP_LOGD(TAG, "Face-down detected");
                     } else {
-                        /* Check if screen-off timeout reached */
                         int64_t face_down_sec = (now_us - s_pm.face_down_start_us) / 1000000;
                         if (face_down_sec >= s_pm.config.screen_off_timeout_sec) {
-                            transition_to_screen_off();
+                            ESP_LOGI(TAG, "Face-down timeout reached");
+                            should_screen_off = true;
                         }
                     }
                 } else {
-                    /* Not face-down, reset timer */
                     if (s_pm.face_down_start_us != 0) {
                         ESP_LOGD(TAG, "No longer face-down");
                     }
                     s_pm.face_down_start_us = 0;
                 }
+
+                /* Idle trigger (uses separate timeout) */
+                if (!should_screen_off && s_pm.config.idle_screen_off_timeout_sec > 0 &&
+                    s_pm.last_activity_us > 0) {
+                    int64_t idle_sec = (now_us - s_pm.last_activity_us) / 1000000;
+                    if (idle_sec >= s_pm.config.idle_screen_off_timeout_sec) {
+                        ESP_LOGI(TAG, "Idle timeout reached (%lld sec)", idle_sec);
+                        should_screen_off = true;
+                    }
+                }
+
+                if (should_screen_off) {
+                    transition_to_screen_off();
+                }
                 break;
+            }
 
             case POWER_STATE_SCREEN_OFF:
-                if (!input->is_face_down) {
-                    /* Picked up - return to active */
+                /* Wake on activity (touch or motion) */
+                if (input->touch_active || input->is_moving) {
+                    ESP_LOGI(TAG, "Activity detected, waking up");
+                    transition_to_active();
+                } else if (!input->is_face_down && s_pm.face_down_start_us != 0) {
+                    /* Was face-down, now picked up */
+                    ESP_LOGI(TAG, "Device picked up");
                     transition_to_active();
                 } else {
-                    /* Check if light-sleep timeout reached */
+                    /* Check if light-sleep timeout reached (shared timeout) */
                     int64_t screen_off_sec = (now_us - s_pm.screen_off_start_us) / 1000000;
                     int64_t sleep_delay = s_pm.config.light_sleep_timeout_sec -
                                           s_pm.config.screen_off_timeout_sec;
@@ -287,6 +324,9 @@ esp_err_t power_manager_init(void)
 
     /* Load configuration from NVS */
     load_config_from_nvs();
+
+    /* Initialize activity timer */
+    s_pm.last_activity_us = esp_timer_get_time();
 
     /* Start power manager task */
     s_pm.running = true;
@@ -389,4 +429,20 @@ void power_manager_wake(void)
         ESP_LOGI(TAG, "Manual wake requested");
         transition_to_active();
     }
+}
+
+esp_err_t power_manager_set_idle_timeout(uint32_t seconds)
+{
+    if (seconds != 0 && (seconds < 60 || seconds > 1800)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_pm.config.idle_screen_off_timeout_sec = seconds;
+    save_config_to_nvs();
+    ESP_LOGI(TAG, "Idle timeout set to %lu sec", seconds);
+    return ESP_OK;
+}
+
+uint32_t power_manager_get_idle_timeout(void)
+{
+    return s_pm.config.idle_screen_off_timeout_sec;
 }

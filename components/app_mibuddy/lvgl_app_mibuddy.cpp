@@ -167,54 +167,60 @@ static void default_input_mapper(
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=false, continue...");
 
-    /* Roll tilt -> SLIDE LEFT/RIGHT (face follows device tilt)
-     * Baseline is landscape left position (roll ~90°)
-     * Tilting towards portrait (roll decreasing) -> SLIDE_LEFT
-     * Tilting past landscape (roll increasing) -> SLIDE_RIGHT
-     * CHECK BEFORE motion detection so tilt takes priority over gyro!
+    /* Roll/Pitch tilt -> SLIDE animations
+     * Skip when face down/up to avoid gimbal lock instability
      */
-    const float ROLL_BASELINE = 90.0f;
-    const float ROLL_THRESHOLD = 25.0f;
-    if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {  // < 65°
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f < 65 -> HAPPY+SLIDE_LEFT", input->roll);
-        *out_state = MOCHI_STATE_HAPPY;
-        *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {  // > 115°
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f > 115 -> HAPPY+SLIDE_RIGHT", input->roll);
-        *out_state = MOCHI_STATE_HAPPY;
-        *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f in range [65-115], continue...", input->roll);
+    if (!input->is_face_down && !input->is_face_up) {
+        /* Roll tilt -> SLIDE LEFT/RIGHT (face follows device tilt)
+         * Baseline is landscape left position (roll ~90°)
+         * Tilting towards portrait (roll decreasing) -> SLIDE_LEFT
+         * Tilting past landscape (roll increasing) -> SLIDE_RIGHT
+         */
+        const float ROLL_BASELINE = 90.0f;
+        const float ROLL_THRESHOLD = 25.0f;
+        if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {  // < 65°
+            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f < 65 -> HAPPY+SLIDE_LEFT", input->roll);
+            *out_state = MOCHI_STATE_HAPPY;
+            *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
+            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+            return;
+        }
+        if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {  // > 115°
+            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f > 115 -> HAPPY+SLIDE_RIGHT", input->roll);
+            *out_state = MOCHI_STATE_HAPPY;
+            *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
+            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+            return;
+        }
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f in range [65-115], continue...", input->roll);
 
-    /* Pitch tilt -> SLIDE UP/DOWN (baseline ~0° in landscape)
-     * Positive pitch = screen tilting face-up -> SLIDE_UP
-     * Negative pitch = screen tilting face-down -> SLIDE_DOWN
-     */
-    const float PITCH_THRESHOLD = 25.0f;
-    if (input->pitch > PITCH_THRESHOLD) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f > 25 -> HAPPY+SLIDE_UP", input->pitch);
-        *out_state = MOCHI_STATE_HAPPY;
-        *out_activity = MOCHI_ACTIVITY_SLIDE_UP;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
+        /* Pitch tilt -> SLIDE UP/DOWN (baseline ~0° in landscape)
+         * Positive pitch = screen tilting face-up -> SLIDE_UP
+         * Negative pitch = screen tilting face-down -> SLIDE_DOWN
+         */
+        const float PITCH_THRESHOLD = 25.0f;
+        if (input->pitch > PITCH_THRESHOLD) {
+            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f > 25 -> HAPPY+SLIDE_UP", input->pitch);
+            *out_state = MOCHI_STATE_HAPPY;
+            *out_activity = MOCHI_ACTIVITY_SLIDE_UP;
+            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+            return;
+        }
+        if (input->pitch < -PITCH_THRESHOLD) {
+            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f < -25 -> HAPPY+SLIDE_DOWN", input->pitch);
+            *out_state = MOCHI_STATE_HAPPY;
+            *out_activity = MOCHI_ACTIVITY_SLIDE_DOWN;
+            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+            return;
+        }
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f in range [-25, 25], continue...", input->pitch);
+    } else {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: face_down/up, skipping roll/pitch checks");
     }
-    if (input->pitch < -PITCH_THRESHOLD) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f < -25 -> HAPPY+SLIDE_DOWN", input->pitch);
-        *out_state = MOCHI_STATE_HAPPY;
-        *out_activity = MOCHI_ACTIVITY_SLIDE_DOWN;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f in range [-25, 25], continue...", input->pitch);
 
     /* Spinning fast -> DIZZY (only if not tilted) */
     if (input->is_spinning) {
@@ -501,17 +507,15 @@ static void update_debug_overlay(void) {
     snprintf(buf, sizeof(buf),
         "%s %s %s\n"
         "%s %s %s\n"
-        "%s %s %s\n"
+        "%s\n"
         "%.1fs",
-        input->is_low_battery ? "LOW" : "---",
         input->is_moving ? "MOV" : "---",
-        input->is_night ? "NGT" : "---",
-        input->is_critical_battery ? "CRT" : "---",
         input->is_shaking ? "SHK" : "---",
-        input->is_weekend ? "WKD" : "---",
+        input->is_night ? "NGT" : "---",
         input->is_idle ? "IDL" : "---",
         input->is_rotating ? "ROT" : "---",
         input->is_spinning ? "SPN" : "---",
+        input->is_weekend ? "WKD" : "---",
         input->current_state_duration_ms / 1000.0f);
     lv_label_set_text(s_debug_calc_label, buf);
 

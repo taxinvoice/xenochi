@@ -229,3 +229,16 @@ esp_err_t AXP2101_driver_init(void)
 
     return ret;
 }
+
+int bsp_battery_get_percent(void)
+{
+    if (!PMU.isBatteryConnect()) {
+        return -1;
+    }
+    return PMU.getBatteryPercent();
+}
+
+bool bsp_battery_is_charging(void)
+{
+    return PMU.isCharging();
+}

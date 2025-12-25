@@ -16,6 +16,14 @@ menu "Power Manager Configuration"
             Time in seconds to wait before entering light sleep
             when the device is placed face-down (after screen is off).
 
+    config POWER_IDLE_SCREEN_OFF_TIMEOUT_SEC
+        int "Idle timeout before screen off (seconds)"
+        default 600
+        range 60 1800
+        help
+            Time with no touch or motion before screen turns off.
+            This is separate from face-down detection timeout.
+
     config POWER_MOTION_POLL_INTERVAL_MS
         int "Motion polling interval during light sleep (ms)"
         default 2000
