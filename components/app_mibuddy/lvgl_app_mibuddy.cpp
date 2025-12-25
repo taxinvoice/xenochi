@@ -26,9 +26,6 @@
 #include "mochi_input.h"
 #include "audio_driver.h"
 
-extern "C" {
-#include "lvgl_mibuddy.h"
-}
 
 using namespace std;
 
@@ -646,11 +643,6 @@ bool PhoneMiBuddyConf::run(void)
 
     ESP_LOGI("MiBuddy", "Input mapper started: interval=%lums (%.1f Hz), API fallback when idle",
              (unsigned long)s_input_timer_interval_ms, 1000.0f / s_input_timer_interval_ms);
-
-#if 0  /* Temporarily disabled */
-    /* Create the slideshow UI (shows embedded images, then SD card PNGs) */
-    lvgl_mibuddy_create(lv_screen_active());
-#endif
 
     return true;
 }
