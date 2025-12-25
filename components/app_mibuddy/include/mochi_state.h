@@ -54,6 +54,10 @@ typedef enum {
     MOCHI_ACTIVITY_BLINK,    /**< Periodic eye blinks */
     MOCHI_ACTIVITY_SNORE,    /**< Breathing + zzz (for sleepy) */
     MOCHI_ACTIVITY_VIBRATE,  /**< Fast micro-shake (for panic) */
+    MOCHI_ACTIVITY_SLIDE_LEFT,  /**< Slide face left (for roll tilt) */
+    MOCHI_ACTIVITY_SLIDE_RIGHT, /**< Slide face right (for roll tilt) */
+    MOCHI_ACTIVITY_SLIDE_UP,    /**< Slide face up (for pitch tilt) */
+    MOCHI_ACTIVITY_SLIDE_DOWN,  /**< Slide face down (for pitch tilt) */
     MOCHI_ACTIVITY_MAX
 } mochi_activity_t;
 
@@ -121,6 +125,7 @@ typedef struct {
 
     /* Face animation */
     float face_squish;       /**< Breathing effect (-0.05 to 0.05) */
+    float face_offset_x;     /**< Horizontal slide offset in pixels */
     float face_offset_y;     /**< Vertical bounce offset */
     float face_rotation;     /**< Rotation angle in degrees */
 

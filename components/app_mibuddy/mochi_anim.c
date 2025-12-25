@@ -211,6 +211,56 @@ static void apply_vibrate_animation(mochi_face_params_t *params, float t) {
 }
 
 /**
+ * @brief Apply slide left animation (for roll tilt)
+ */
+static void apply_slide_left_animation(mochi_face_params_t *params, float t) {
+    /* Slide WHOLE face to the left - major movement! */
+    float wobble = sinf(t * 2 * PI * 2.0f);  /* Faster wobble */
+    params->face_offset_x = -40.0f * s_anim.intensity + wobble * 5.0f;  /* Big slide left */
+    params->face_rotation = -15.0f * s_anim.intensity;  /* Strong tilt left */
+    params->face_offset_y = fabsf(wobble) * 4.0f * s_anim.intensity;  /* Bounce */
+    params->eye_offset_x = wobble * 4.0f;  /* Eyes wobble within face */
+    params->face_squish = wobble * 0.03f * s_anim.intensity;  /* Breathing effect */
+}
+
+/**
+ * @brief Apply slide right animation (for roll tilt)
+ */
+static void apply_slide_right_animation(mochi_face_params_t *params, float t) {
+    /* Slide WHOLE face to the right - major movement! */
+    float wobble = sinf(t * 2 * PI * 2.0f);  /* Faster wobble */
+    params->face_offset_x = 40.0f * s_anim.intensity + wobble * 5.0f;  /* Big slide right */
+    params->face_rotation = 15.0f * s_anim.intensity;  /* Strong tilt right */
+    params->face_offset_y = fabsf(wobble) * 4.0f * s_anim.intensity;  /* Bounce */
+    params->eye_offset_x = wobble * 4.0f;  /* Eyes wobble within face */
+    params->face_squish = wobble * 0.03f * s_anim.intensity;  /* Breathing effect */
+}
+
+/**
+ * @brief Apply slide up animation (for pitch tilt - face tilting up)
+ */
+static void apply_slide_up_animation(mochi_face_params_t *params, float t) {
+    /* Slide WHOLE face up - major movement! */
+    float wobble = sinf(t * 2 * PI * 2.0f);  /* Faster wobble */
+    params->face_offset_y = -35.0f * s_anim.intensity + wobble * 5.0f;  /* Big slide up */
+    params->eye_offset_y = wobble * 4.0f;  /* Eyes wobble within face */
+    params->face_squish = -0.06f * s_anim.intensity + wobble * 0.02f;  /* Stretch vertically */
+    params->face_rotation = wobble * 3.0f * s_anim.intensity;  /* Slight rotation wobble */
+}
+
+/**
+ * @brief Apply slide down animation (for pitch tilt - face tilting down)
+ */
+static void apply_slide_down_animation(mochi_face_params_t *params, float t) {
+    /* Slide WHOLE face down - major movement! */
+    float wobble = sinf(t * 2 * PI * 2.0f);  /* Faster wobble */
+    params->face_offset_y = 35.0f * s_anim.intensity + wobble * 5.0f;  /* Big slide down */
+    params->eye_offset_y = wobble * 4.0f;  /* Eyes wobble within face */
+    params->face_squish = 0.06f * s_anim.intensity + wobble * 0.02f;  /* Squash vertically */
+    params->face_rotation = wobble * 3.0f * s_anim.intensity;  /* Slight rotation wobble */
+}
+
+/**
  * @brief Apply state-specific animations (for Dizzy, Panic, etc.)
  */
 static void apply_state_animation(mochi_face_params_t *params, float t) {
@@ -291,6 +341,18 @@ static void anim_timer_cb(lv_timer_t *timer) {
             break;
         case MOCHI_ACTIVITY_VIBRATE:
             apply_vibrate_animation(params, t);
+            break;
+        case MOCHI_ACTIVITY_SLIDE_LEFT:
+            apply_slide_left_animation(params, t);
+            break;
+        case MOCHI_ACTIVITY_SLIDE_RIGHT:
+            apply_slide_right_animation(params, t);
+            break;
+        case MOCHI_ACTIVITY_SLIDE_UP:
+            apply_slide_up_animation(params, t);
+            break;
+        case MOCHI_ACTIVITY_SLIDE_DOWN:
+            apply_slide_down_animation(params, t);
             break;
         default:
             apply_idle_animation(params, t);

@@ -167,7 +167,56 @@ static void default_input_mapper(
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=false, continue...");
 
-    /* Spinning fast -> DIZZY */
+    /* Roll tilt -> SLIDE LEFT/RIGHT (face follows device tilt)
+     * Baseline is landscape left position (roll ~90°)
+     * Tilting towards portrait (roll decreasing) -> SLIDE_LEFT
+     * Tilting past landscape (roll increasing) -> SLIDE_RIGHT
+     * CHECK BEFORE motion detection so tilt takes priority over gyro!
+     */
+    const float ROLL_BASELINE = 90.0f;
+    const float ROLL_THRESHOLD = 25.0f;
+    if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {  // < 65°
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f < 65 -> HAPPY+SLIDE_LEFT", input->roll);
+        *out_state = MOCHI_STATE_HAPPY;
+        *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {  // > 115°
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f > 115 -> HAPPY+SLIDE_RIGHT", input->roll);
+        *out_state = MOCHI_STATE_HAPPY;
+        *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f in range [65-115], continue...", input->roll);
+
+    /* Pitch tilt -> SLIDE UP/DOWN (baseline ~0° in landscape)
+     * Positive pitch = screen tilting face-up -> SLIDE_UP
+     * Negative pitch = screen tilting face-down -> SLIDE_DOWN
+     */
+    const float PITCH_THRESHOLD = 25.0f;
+    if (input->pitch > PITCH_THRESHOLD) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f > 25 -> HAPPY+SLIDE_UP", input->pitch);
+        *out_state = MOCHI_STATE_HAPPY;
+        *out_activity = MOCHI_ACTIVITY_SLIDE_UP;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (input->pitch < -PITCH_THRESHOLD) {
+        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f < -25 -> HAPPY+SLIDE_DOWN", input->pitch);
+        *out_state = MOCHI_STATE_HAPPY;
+        *out_activity = MOCHI_ACTIVITY_SLIDE_DOWN;
+        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
+                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+        return;
+    }
+    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f in range [-25, 25], continue...", input->pitch);
+
+    /* Spinning fast -> DIZZY (only if not tilted) */
     if (input->is_spinning) {
         if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_spinning=TRUE -> DIZZY+SPIN");
         *out_state = MOCHI_STATE_DIZZY;
@@ -243,17 +292,6 @@ static void default_input_mapper(
         return;
     }
     if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=false, continue...");
-
-    /* Landscape orientation -> COOL (relaxed viewing) */
-    if (input->is_landscape_left || input->is_landscape_right) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_landscape=TRUE -> COOL+IDLE");
-        *out_state = MOCHI_STATE_COOL;
-        *out_activity = MOCHI_ACTIVITY_IDLE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_landscape=false, continue...");
 
     /* Low battery (but not critical) -> WORRIED */
     if (input->is_low_battery) {
@@ -430,9 +468,10 @@ static void create_debug_overlay(lv_obj_t *parent) {
     lv_obj_align(s_debug_motion_label, LV_ALIGN_TOP_RIGHT, -8, 45);
     lv_label_set_text(s_debug_motion_label, "MOTION");
 
-    /* Angles label - bottom left (above nav bar) */
+    /* Angles label - bottom left (above nav bar) - bigger font */
     s_debug_angles_label = lv_label_create(s_debug_overlay);
     lv_obj_add_style(s_debug_angles_label, &style_label, 0);
+    lv_obj_set_style_text_font(s_debug_angles_label, &lv_font_montserrat_18, 0);
     lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
     lv_label_set_text(s_debug_angles_label, "P:0 R:0");
 
@@ -485,8 +524,16 @@ static void update_debug_overlay(void) {
     lv_label_set_text(s_debug_motion_label, buf);
     lv_obj_align(s_debug_motion_label, LV_ALIGN_TOP_RIGHT, -8, 45);
 
-    /* Pitch and Roll angles */
-    snprintf(buf, sizeof(buf), "P:%+.0f R:%+.0f", input->pitch, input->roll);
+    /* Pitch and Roll angles with direction indicators */
+    const char *pitch_dir = " ";
+    if (input->pitch > 25.0f) pitch_dir = "^";       // SLIDE_UP threshold
+    else if (input->pitch < -25.0f) pitch_dir = "v";  // SLIDE_DOWN threshold
+
+    const char *roll_dir = "  ";
+    if (input->roll < 65.0f) roll_dir = "<<";       // SLIDE_LEFT threshold
+    else if (input->roll > 115.0f) roll_dir = ">>";  // SLIDE_RIGHT threshold
+
+    snprintf(buf, sizeof(buf), "P:%+.0f%s R:%+.0f%s", input->pitch, pitch_dir, input->roll, roll_dir);
     lv_label_set_text(s_debug_angles_label, buf);
     lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
 

@@ -166,7 +166,7 @@ static void draw_background(lv_layer_t *layer, const mochi_theme_t *theme) {
  * @brief Draw the main face shape
  */
 static void draw_face(lv_layer_t *layer, const mochi_face_params_t *p, const mochi_theme_t *theme) {
-    int cx = FACE_CENTER_X;
+    int cx = FACE_CENTER_X + (int)p->face_offset_x;
     int cy = FACE_CENTER_Y + (int)p->face_offset_y;
 
     /* Apply squish effect */
@@ -191,18 +191,19 @@ static void draw_face(lv_layer_t *layer, const mochi_face_params_t *p, const moc
 static void draw_blush(lv_layer_t *layer, const mochi_face_params_t *p, const mochi_theme_t *theme) {
     if (!p->show_blush) return;
 
+    int cx = FACE_CENTER_X + (int)p->face_offset_x;
     int cy = FACE_CENTER_Y + (int)p->face_offset_y + BLUSH_Y;
 
     /* Left blush - layered for soft effect */
     for (int i = 0; i < 3; i++) {
-        draw_ellipse(layer, FACE_CENTER_X - BLUSH_X + i, cy,
+        draw_ellipse(layer, cx - BLUSH_X + i, cy,
                      BLUSH_RX - i * 3, BLUSH_RY - i * 2,
                      theme->blush, LV_OPA_60 - i * 10);
     }
 
     /* Right blush */
     for (int i = 0; i < 3; i++) {
-        draw_ellipse(layer, FACE_CENTER_X + BLUSH_X - i, cy,
+        draw_ellipse(layer, cx + BLUSH_X - i, cy,
                      BLUSH_RX - i * 3, BLUSH_RY - i * 2,
                      theme->blush, LV_OPA_60 - i * 10);
     }
@@ -262,20 +263,21 @@ static void draw_eye(lv_layer_t *layer, int cx, int cy, bool is_right,
  * @brief Draw both eyes
  */
 static void draw_eyes(lv_layer_t *layer, const mochi_face_params_t *p, const mochi_theme_t *theme) {
+    int cx = FACE_CENTER_X + (int)p->face_offset_x;
     int cy = FACE_CENTER_Y + (int)p->face_offset_y + EYE_Y;
 
     /* Left eye */
-    draw_eye(layer, FACE_CENTER_X + LEFT_EYE_X, cy, false, p, theme);
+    draw_eye(layer, cx + LEFT_EYE_X, cy, false, p, theme);
 
     /* Right eye */
-    draw_eye(layer, FACE_CENTER_X + RIGHT_EYE_X, cy, true, p, theme);
+    draw_eye(layer, cx + RIGHT_EYE_X, cy, true, p, theme);
 }
 
 /**
  * @brief Draw the mouth
  */
 static void draw_mouth(lv_layer_t *layer, const mochi_face_params_t *p, const mochi_theme_t *theme) {
-    int cx = FACE_CENTER_X;
+    int cx = FACE_CENTER_X + (int)p->face_offset_x;
     int cy = FACE_CENTER_Y + (int)p->face_offset_y + MOUTH_Y;
     float open = p->mouth_open;
 

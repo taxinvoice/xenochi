@@ -239,6 +239,10 @@ static const char* const ACTIVITY_NAMES[MOCHI_ACTIVITY_MAX] = {
     "Blink",
     "Snore",
     "Vibrate",
+    "SlideLeft",
+    "SlideRight",
+    "SlideUp",
+    "SlideDown",
 };
 
 static const char* const THEME_NAMES[MOCHI_THEME_MAX] = {
