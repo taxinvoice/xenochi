@@ -80,255 +80,60 @@ uint32_t mibuddy_get_input_interval(void)
 }
 
 /**
- * @brief Default mapper function - maps inputs to mochi state
+ * @brief Simplified test mapper - minimal conditions for testing motion thresholds
  *
- * This is a simple example mapper. Users can replace this with their own logic.
- * The mapper examines input state and decides which mochi state/activity to use.
+ * Priority: braking > face_down > roll_left > roll_right > low_battery > default
  */
 static void default_input_mapper(
     const mochi_input_state_t *input,
     mochi_state_t *out_state,
     mochi_activity_t *out_activity)
 {
-    static const char *MAP_TAG = "input_mapper";
-    static int call_count = 0;
-    call_count++;
+    /* Log motion state for testing */
+    ESP_LOGI("TEST", "braking:%d delta:%.1f roll:%.1f low_batt:%d",
+             input->is_braking, input->accel_delta_per_sec,
+             input->roll, input->is_low_battery);
 
-    /* Log every 10th call to reduce spam, or every call if you want full verbosity */
-    bool verbose = (call_count % 10 == 1);  /* Change to (true) for every call */
-
-    if (verbose) {
-        ESP_LOGI(MAP_TAG, "========================================");
-        ESP_LOGI(MAP_TAG, "MAPPER CALL #%d", call_count);
-        ESP_LOGI(MAP_TAG, "========================================");
-
-        /* ── Static Variables ── */
-        ESP_LOGI(MAP_TAG, "--- STATIC INPUTS ---");
-        ESP_LOGI(MAP_TAG, "Battery: %.1f%%, charging: %s, temp: %.1f°C",
-                 input->battery_pct,
-                 input->is_charging ? "YES" : "NO",
-                 input->temperature);
-        ESP_LOGI(MAP_TAG, "Time: %02d:%02d, day_of_week: %d",
-                 input->hour, input->minute, input->day_of_week);
-        ESP_LOGI(MAP_TAG, "Accel: X=%.2f Y=%.2f Z=%.2f g",
-                 input->accel_x, input->accel_y, input->accel_z);
-        ESP_LOGI(MAP_TAG, "Gyro: X=%.1f Y=%.1f Z=%.1f deg/s",
-                 input->gyro_x, input->gyro_y, input->gyro_z);
-        ESP_LOGI(MAP_TAG, "WiFi: %s, Touch: %s",
-                 input->wifi_connected ? "CONNECTED" : "disconnected",
-                 input->touch_active ? "ACTIVE" : "inactive");
-
-        /* ── Calculated Variables ── */
-        ESP_LOGI(MAP_TAG, "--- CALCULATED ---");
-
-        /* Motion */
-        ESP_LOGI(MAP_TAG, "accel_mag: %.2fg, gyro_mag: %.1f°/s",
-                 input->accel_magnitude, input->gyro_magnitude);
-        ESP_LOGI(MAP_TAG, "is_moving: %s | is_shaking: %s | is_rotating: %s | is_spinning: %s",
-                 input->is_moving ? "YES" : "no",
-                 input->is_shaking ? "YES" : "no",
-                 input->is_rotating ? "YES" : "no",
-                 input->is_spinning ? "YES" : "no");
-
-        /* Orientation */
-        const char *orient = "unknown";
-        if (input->is_face_up) orient = "FACE_UP";
-        else if (input->is_face_down) orient = "FACE_DOWN";
-        else if (input->is_portrait) orient = "PORTRAIT";
-        else if (input->is_portrait_inv) orient = "PORTRAIT_INV";
-        else if (input->is_landscape_left) orient = "LANDSCAPE_LEFT";
-        else if (input->is_landscape_right) orient = "LANDSCAPE_RIGHT";
-        ESP_LOGI(MAP_TAG, "Orientation: %s, pitch: %.1f°, roll: %.1f°",
-                 orient, input->pitch, input->roll);
-
-        /* Battery/Time */
-        ESP_LOGI(MAP_TAG, "low_batt: %s | critical: %s | night: %s | weekend: %s",
-                 input->is_low_battery ? "YES" : "no",
-                 input->is_critical_battery ? "YES" : "no",
-                 input->is_night ? "YES" : "no",
-                 input->is_weekend ? "YES" : "no");
-
-        ESP_LOGI(MAP_TAG, "--- DECISION LOGIC ---");
-    }
-
-    /* Priority order: most urgent conditions first */
-
-    /* Shaking device -> PANIC */
-    if (input->is_shaking) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=TRUE -> PANIC+VIBRATE");
-        *out_state = MOCHI_STATE_PANIC;
-        *out_activity = MOCHI_ACTIVITY_VIBRATE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
+    /* 1. Braking (catching device) */
+    if (input->is_braking) {
+        *out_state = MOCHI_STATE_SHOCKED;
+        *out_activity = MOCHI_ACTIVITY_IDLE;
         return;
     }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_shaking=false, continue...");
 
-    /* Roll/Pitch tilt -> SLIDE animations
-     * Skip when face down/up to avoid gimbal lock instability
-     */
+    /* 2. Face down */
+    if (input->is_face_down) {
+        *out_state = MOCHI_STATE_SLEEPY;
+        *out_activity = MOCHI_ACTIVITY_SNORE;
+        return;
+    }
+
+    /* 3-4. Roll tilt (skip if face down/up) */
     if (!input->is_face_down && !input->is_face_up) {
-        /* Roll tilt -> SLIDE LEFT/RIGHT (face follows device tilt)
-         * Baseline is landscape left position (roll ~90°)
-         * Tilting towards portrait (roll decreasing) -> SLIDE_LEFT
-         * Tilting past landscape (roll increasing) -> SLIDE_RIGHT
-         */
         const float ROLL_BASELINE = 90.0f;
         const float ROLL_THRESHOLD = 25.0f;
-        if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {  // < 65°
-            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f < 65 -> HAPPY+SLIDE_LEFT", input->roll);
+        if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {
             *out_state = MOCHI_STATE_HAPPY;
             *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
-            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
             return;
         }
-        if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {  // > 115°
-            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f > 115 -> HAPPY+SLIDE_RIGHT", input->roll);
+        if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {
             *out_state = MOCHI_STATE_HAPPY;
             *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
-            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
             return;
         }
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: roll=%.1f in range [65-115], continue...", input->roll);
-
-        /* Pitch tilt -> SLIDE UP/DOWN (baseline ~0° in landscape)
-         * Positive pitch = screen tilting face-up -> SLIDE_UP
-         * Negative pitch = screen tilting face-down -> SLIDE_DOWN
-         */
-        const float PITCH_THRESHOLD = 25.0f;
-        if (input->pitch > PITCH_THRESHOLD) {
-            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f > 25 -> HAPPY+SLIDE_UP", input->pitch);
-            *out_state = MOCHI_STATE_HAPPY;
-            *out_activity = MOCHI_ACTIVITY_SLIDE_UP;
-            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-            return;
-        }
-        if (input->pitch < -PITCH_THRESHOLD) {
-            if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f < -25 -> HAPPY+SLIDE_DOWN", input->pitch);
-            *out_state = MOCHI_STATE_HAPPY;
-            *out_activity = MOCHI_ACTIVITY_SLIDE_DOWN;
-            if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-            return;
-        }
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: pitch=%.1f in range [-25, 25], continue...", input->pitch);
-    } else {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: face_down/up, skipping roll/pitch checks");
     }
 
-    /* Spinning fast -> DIZZY (only if not tilted) */
-    if (input->is_spinning) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_spinning=TRUE -> DIZZY+SPIN");
-        *out_state = MOCHI_STATE_DIZZY;
-        *out_activity = MOCHI_ACTIVITY_SPIN;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_spinning=false, continue...");
-
-    /* Critical battery -> WORRIED */
-    if (input->is_critical_battery) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=TRUE -> WORRIED+IDLE");
-        *out_state = MOCHI_STATE_WORRIED;
-        *out_activity = MOCHI_ACTIVITY_IDLE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_critical_battery=false, continue...");
-
-    /* Face down -> SLEEPY (device put down to rest) */
-    if (input->is_face_down) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_face_down=TRUE -> SLEEPY+SNORE");
-        *out_state = MOCHI_STATE_SLEEPY;
-        *out_activity = MOCHI_ACTIVITY_SNORE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_face_down=false, continue...");
-
-    /* Upside down -> SHOCKED */
-    if (input->is_portrait_inv) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_portrait_inv=TRUE -> SHOCKED+WIGGLE");
-        *out_state = MOCHI_STATE_SHOCKED;
-        *out_activity = MOCHI_ACTIVITY_WIGGLE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_portrait_inv=false, continue...");
-
-    /* Night time -> SLEEPY */
-    if (input->is_night) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_night=TRUE -> SLEEPY+SNORE");
-        *out_state = MOCHI_STATE_SLEEPY;
-        *out_activity = MOCHI_ACTIVITY_SNORE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_night=false, continue...");
-
-    /* Rotating gently -> COOL with NOD */
-    if (input->is_rotating) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_rotating=TRUE -> COOL+NOD");
-        *out_state = MOCHI_STATE_COOL;
-        *out_activity = MOCHI_ACTIVITY_NOD;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_rotating=false, continue...");
-
-    /* Moving around -> EXCITED */
-    if (input->is_moving) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=TRUE -> EXCITED+BOUNCE");
-        *out_state = MOCHI_STATE_EXCITED;
-        *out_activity = MOCHI_ACTIVITY_BOUNCE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-        return;
-    }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_moving=false, continue...");
-
-    /* Low battery (but not critical) -> WORRIED */
+    /* 5. Low battery */
     if (input->is_low_battery) {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=TRUE -> WORRIED+IDLE");
         *out_state = MOCHI_STATE_WORRIED;
         *out_activity = MOCHI_ACTIVITY_IDLE;
-        if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                              mochi_state_name(*out_state), mochi_activity_name(*out_activity));
         return;
     }
-    if (verbose) ESP_LOGI(MAP_TAG, "CHECK: is_low_battery=false, continue...");
 
-    /* Default: Check for API result or request async query */
-    if (input->wifi_connected) {
-        /* First check if we have a pending API result (non-blocking) */
-        if (mochi_input_get_api_result(out_state, out_activity)) {
-            if (verbose) ESP_LOGI(MAP_TAG, ">>> ASYNC API RESULT: %s + %s",
-                                  mochi_state_name(*out_state), mochi_activity_name(*out_activity));
-            return;  /* API decided */
-        }
-
-        /* No result yet - request a query (non-blocking, runs in background task) */
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: wifi_connected=TRUE, requesting async API...");
-        mochi_input_request_api_query(input);
-    } else {
-        if (verbose) ESP_LOGI(MAP_TAG, "CHECK: wifi_connected=false, skipping API");
-    }
-
-    /* Fallback: HAPPY (while waiting for API or if offline) */
-    if (verbose) ESP_LOGI(MAP_TAG, "FALLBACK: No conditions met -> HAPPY+IDLE");
+    /* 6. Default */
     *out_state = MOCHI_STATE_HAPPY;
     *out_activity = MOCHI_ACTIVITY_IDLE;
-    if (verbose) ESP_LOGI(MAP_TAG, ">>> RESULT: %s + %s",
-                          mochi_state_name(*out_state), mochi_activity_name(*out_activity));
 }
 
 /*===========================================================================
@@ -478,8 +283,7 @@ static void create_debug_overlay(lv_obj_t *parent) {
     lv_obj_align(s_debug_angles_label, LV_ALIGN_BOTTOM_LEFT, 8, -45);
     lv_label_set_text(s_debug_angles_label, "P:0 R:0");
 
-    /* Send to back so face is visible on top */
-    lv_obj_move_background(s_debug_overlay);
+    /* Note: overlay is moved to foreground after mochi_create() in constructor */
 }
 
 static void update_debug_overlay(void) {
@@ -602,7 +406,7 @@ bool PhoneMiBuddyConf::run(void)
     /* Initialize audio system before mochi (which may play sounds) */
     Audio_Play_Init();
 
-    /* Create debug overlay FIRST so it's behind the mochi face */
+    /* Create debug overlay */
     create_debug_overlay(lv_screen_active());
 
     /* Initialize and create mochi avatar
@@ -610,6 +414,9 @@ bool PhoneMiBuddyConf::run(void)
      */
     mochi_init();
     mochi_create(lv_screen_active());
+
+    /* Bring debug overlay to front AFTER face is created */
+    lv_obj_move_foreground(s_debug_overlay);
 
     /* Create state label overlay at top of screen */
     s_state_label = lv_label_create(lv_screen_active());

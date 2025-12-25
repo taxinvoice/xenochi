@@ -7,6 +7,7 @@
 
 #include "mochi_input.h"
 #include "mochi_state.h"
+#include "motion_config.h"
 #include "bsp_board.h"
 #include "wifi_manager.h"
 #include "qmi8658.h"
@@ -41,6 +42,8 @@ static struct {
     mochi_state_t last_state;
     mochi_activity_t last_activity;
     int64_t state_change_time_us;  /* Timestamp when state last changed (microseconds) */
+    float prev_accel_magnitude;    /* Previous frame's accel magnitude for braking detection */
+    int64_t prev_update_time_us;   /* Timestamp of previous update for braking calc */
 } s_input = {
     .initialized = false,
     .state = {},
@@ -49,6 +52,8 @@ static struct {
     .last_state = MOCHI_STATE_HAPPY,
     .last_activity = MOCHI_ACTIVITY_IDLE,
     .state_change_time_us = 0,
+    .prev_accel_magnitude = 1.0f,  /* At rest = 1g */
+    .prev_update_time_us = 0,
 };
 
 /*===========================================================================
@@ -149,18 +154,46 @@ static void compute_calculated_inputs(void)
     float az = s_input.state.accel_z;
     s_input.state.accel_magnitude = sqrtf(ax*ax + ay*ay + az*az);
 
+    /* Get motion thresholds from config */
+    const motion_config_t *cfg = motion_config_get_ptr();
+
     /* Motion detection - deviation from rest (1g pointing down) */
     float deviation = fabsf(s_input.state.accel_magnitude - 1.0f);
-    s_input.state.is_moving = (deviation > 0.3f);
-    s_input.state.is_shaking = (s_input.state.accel_magnitude > 2.0f);
+    s_input.state.is_moving = (deviation > cfg->moving_threshold_g);
+    s_input.state.is_shaking = (s_input.state.accel_magnitude > cfg->shaking_threshold_g);
 
     /* Gyroscope magnitude and rotation detection */
     float gx = s_input.state.gyro_x;
     float gy = s_input.state.gyro_y;
     float gz = s_input.state.gyro_z;
     s_input.state.gyro_magnitude = sqrtf(gx*gx + gy*gy + gz*gz);
-    s_input.state.is_rotating = (s_input.state.gyro_magnitude > 30.0f);
-    s_input.state.is_spinning = (s_input.state.gyro_magnitude > 100.0f);
+    s_input.state.is_rotating = (s_input.state.gyro_magnitude > cfg->rotating_threshold_dps);
+    s_input.state.is_spinning = (s_input.state.gyro_magnitude > cfg->spinning_threshold_dps);
+
+    /* Braking detection - rapid deceleration (catching/stopping motion)
+     * Braking occurs when:
+     * 1. Previous magnitude was > current magnitude (slowing down)
+     * 2. The rate of change exceeds threshold
+     *
+     * delta_per_sec = (prev_mag - curr_mag) / dt
+     * Positive delta = decelerating/braking
+     */
+    int64_t now_us = esp_timer_get_time();
+    if (s_input.prev_update_time_us > 0) {
+        float dt_sec = (float)(now_us - s_input.prev_update_time_us) / 1000000.0f;
+        if (dt_sec > 0.001f) {  /* Avoid division by zero */
+            float delta = s_input.prev_accel_magnitude - s_input.state.accel_magnitude;
+            s_input.state.accel_delta_per_sec = delta / dt_sec;
+            /* Braking = positive delta (slowing down) above threshold */
+            s_input.state.is_braking = (s_input.state.accel_delta_per_sec > cfg->braking_threshold_gps);
+        }
+    } else {
+        s_input.state.accel_delta_per_sec = 0.0f;
+        s_input.state.is_braking = false;
+    }
+    /* Store for next frame */
+    s_input.prev_accel_magnitude = s_input.state.accel_magnitude;
+    s_input.prev_update_time_us = now_us;
 
     /* Device orientation from gravity vector
      * Only reliable when device is relatively stationary (low gyro)
@@ -231,11 +264,10 @@ static void compute_calculated_inputs(void)
     /* Idle detection - not moving and not rotating */
     s_input.state.is_idle = !s_input.state.is_moving && !s_input.state.is_rotating;
 
-    /* State duration - time since last state change */
+    /* State duration - time since last state change (reuse now_us from braking calc) */
     if (s_input.state_change_time_us == 0) {
-        s_input.state_change_time_us = esp_timer_get_time();
+        s_input.state_change_time_us = now_us;
     }
-    int64_t now_us = esp_timer_get_time();
     int64_t duration_us = now_us - s_input.state_change_time_us;
     s_input.state.current_state_duration_ms = (uint32_t)(duration_us / 1000);
 }
@@ -356,11 +388,16 @@ esp_err_t mochi_input_init(void)
         return ESP_OK;
     }
 
+    /* Initialize motion config (loads thresholds from NVS) */
+    motion_config_init();
+
     memset(&s_input.state, 0, sizeof(s_input.state));
     s_input.mapper_fn = NULL;
     s_input.api_url[0] = '\0';
     s_input.last_state = MOCHI_STATE_HAPPY;
     s_input.last_activity = MOCHI_ACTIVITY_IDLE;
+    s_input.prev_accel_magnitude = 1.0f;
+    s_input.prev_update_time_us = 0;
 
     /* Create async API system */
     s_api.mutex = xSemaphoreCreateMutex();
@@ -577,6 +614,8 @@ static esp_err_t api_query_blocking(
     cJSON_AddBoolToObject(root, "shaking", input->is_shaking);
     cJSON_AddBoolToObject(root, "rotating", input->is_rotating);
     cJSON_AddBoolToObject(root, "spinning", input->is_spinning);
+    cJSON_AddBoolToObject(root, "braking", input->is_braking);
+    cJSON_AddNumberToObject(root, "accel_delta", roundf(input->accel_delta_per_sec * 10.0f) / 10.0f);
 
     /* Device orientation */
     cJSON_AddBoolToObject(root, "face_up", input->is_face_up);

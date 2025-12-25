@@ -101,6 +101,10 @@ typedef struct {
     bool  is_rotating;           /**< Device being rotated (gyro > 30 deg/s) */
     bool  is_spinning;           /**< Fast rotation (gyro > 100 deg/s) */
 
+    /* Deceleration detection (braking/catching) */
+    float accel_delta_per_sec;   /**< Rate of acceleration change in g/s */
+    bool  is_braking;            /**< Rapid deceleration detected (catching/stopping) */
+
     /* Time */
     bool  is_night;              /**< hour in [22..6] */
     bool  is_weekend;            /**< Saturday or Sunday */

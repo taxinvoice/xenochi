@@ -37,6 +37,7 @@
 #include "time_sync.h"
 #include "sd_logger.h"
 #include "power_manager.h"
+#include "motion_config.h"
 
 using namespace std;
 using namespace esp_brookesia::gui;
@@ -84,6 +85,19 @@ static lv_obj_t *screen_off_slider = NULL;  /**< Screen off timeout slider */
 static lv_obj_t *screen_off_value = NULL;   /**< Screen off timeout value label */
 static lv_obj_t *sleep_slider = NULL;       /**< Light sleep timeout slider */
 static lv_obj_t *sleep_value = NULL;        /**< Light sleep timeout value label */
+
+/* Motion settings UI elements */
+static lv_obj_t *motion_moving_slider = NULL;
+static lv_obj_t *motion_moving_value = NULL;
+static lv_obj_t *motion_shaking_slider = NULL;
+static lv_obj_t *motion_shaking_value = NULL;
+static lv_obj_t *motion_rotating_slider = NULL;
+static lv_obj_t *motion_rotating_value = NULL;
+static lv_obj_t *motion_spinning_slider = NULL;
+static lv_obj_t *motion_spinning_value = NULL;
+static lv_obj_t *motion_braking_slider = NULL;
+static lv_obj_t *motion_braking_value = NULL;
+static lv_obj_t *motion_reset_btn = NULL;
 
 /* External PMU object from AXP2101 driver */
 extern XPowersPMU PMU;
@@ -484,6 +498,128 @@ static void sleep_slider_event_cb(lv_event_t *e)
     update_sleep_value_label(seconds);
 }
 
+/*===========================================================================
+ * Motion Settings Callbacks
+ *===========================================================================*/
+
+static void update_motion_moving_value(float g)
+{
+    if (motion_moving_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.2fg", g);
+        lv_label_set_text(motion_moving_value, buf);
+    }
+}
+
+static void update_motion_shaking_value(float g)
+{
+    if (motion_shaking_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.1fg", g);
+        lv_label_set_text(motion_shaking_value, buf);
+    }
+}
+
+static void update_motion_rotating_value(float dps)
+{
+    if (motion_rotating_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.0f", dps);
+        lv_label_set_text(motion_rotating_value, buf);
+    }
+}
+
+static void update_motion_spinning_value(float dps)
+{
+    if (motion_spinning_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.0f", dps);
+        lv_label_set_text(motion_spinning_value, buf);
+    }
+}
+
+static void update_motion_braking_value(float gps)
+{
+    if (motion_braking_value != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.1f", gps);
+        lv_label_set_text(motion_braking_value, buf);
+    }
+}
+
+static void motion_moving_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    int value = lv_slider_get_value(slider);
+    float g = (float)value / 100.0f;  /* Slider 10-100 -> 0.10-1.00g */
+    motion_config_set_moving_threshold(g);
+    update_motion_moving_value(g);
+}
+
+static void motion_shaking_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    int value = lv_slider_get_value(slider);
+    float g = (float)value / 10.0f;  /* Slider 10-50 -> 1.0-5.0g */
+    motion_config_set_shaking_threshold(g);
+    update_motion_shaking_value(g);
+}
+
+static void motion_rotating_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    float dps = (float)lv_slider_get_value(slider);  /* Slider 10-100 deg/s */
+    motion_config_set_rotating_threshold(dps);
+    update_motion_rotating_value(dps);
+}
+
+static void motion_spinning_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    float dps = (float)lv_slider_get_value(slider);  /* Slider 50-300 deg/s */
+    motion_config_set_spinning_threshold(dps);
+    update_motion_spinning_value(dps);
+}
+
+static void motion_braking_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    int value = lv_slider_get_value(slider);
+    float gps = (float)value / 10.0f;  /* Slider 10-100 -> 1.0-10.0 g/s */
+    motion_config_set_braking_threshold(gps);
+    update_motion_braking_value(gps);
+}
+
+static void motion_reset_btn_event_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        motion_config_reset_defaults();
+
+        /* Update all sliders and labels to default values */
+        if (motion_moving_slider) {
+            lv_slider_set_value(motion_moving_slider, (int)(MOTION_DEFAULT_MOVING_G * 100), LV_ANIM_ON);
+            update_motion_moving_value(MOTION_DEFAULT_MOVING_G);
+        }
+        if (motion_shaking_slider) {
+            lv_slider_set_value(motion_shaking_slider, (int)(MOTION_DEFAULT_SHAKING_G * 10), LV_ANIM_ON);
+            update_motion_shaking_value(MOTION_DEFAULT_SHAKING_G);
+        }
+        if (motion_rotating_slider) {
+            lv_slider_set_value(motion_rotating_slider, (int)MOTION_DEFAULT_ROTATING_DPS, LV_ANIM_ON);
+            update_motion_rotating_value(MOTION_DEFAULT_ROTATING_DPS);
+        }
+        if (motion_spinning_slider) {
+            lv_slider_set_value(motion_spinning_slider, (int)MOTION_DEFAULT_SPINNING_DPS, LV_ANIM_ON);
+            update_motion_spinning_value(MOTION_DEFAULT_SPINNING_DPS);
+        }
+        if (motion_braking_slider) {
+            lv_slider_set_value(motion_braking_slider, (int)(MOTION_DEFAULT_BRAKING_GPS * 10), LV_ANIM_ON);
+            update_motion_braking_value(MOTION_DEFAULT_BRAKING_GPS);
+        }
+        printf("Motion thresholds reset to defaults\n");
+    }
+}
+
 /**
  * @brief Update log size display label
  */
@@ -722,6 +858,74 @@ bool PhoneSettingConf::run(void)
     sleep_value = lv_label_create(panel1);
     update_sleep_value_label(power_manager_get_sleep_timeout());
 
+    /* Motion Settings section */
+    lv_obj_t * motion_label = lv_label_create(panel1);
+    lv_label_set_text(motion_label, "Motion Thresholds");
+    lv_obj_add_style(motion_label, &style_text_muted, 0);
+
+    /* Moving threshold slider (0.10 - 1.00 g) */
+    lv_obj_t * moving_label = lv_label_create(panel1);
+    lv_label_set_text(moving_label, "Moving:");
+    motion_moving_slider = lv_slider_create(panel1);
+    lv_obj_set_size(motion_moving_slider, 80, 25);
+    lv_slider_set_range(motion_moving_slider, 10, 100);  /* 0.10 - 1.00 g */
+    lv_slider_set_value(motion_moving_slider, (int)(motion_config_get_moving_threshold() * 100), LV_ANIM_OFF);
+    lv_obj_add_event_cb(motion_moving_slider, motion_moving_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    motion_moving_value = lv_label_create(panel1);
+    update_motion_moving_value(motion_config_get_moving_threshold());
+
+    /* Shaking threshold slider (1.0 - 5.0 g) */
+    lv_obj_t * shaking_label = lv_label_create(panel1);
+    lv_label_set_text(shaking_label, "Shaking:");
+    motion_shaking_slider = lv_slider_create(panel1);
+    lv_obj_set_size(motion_shaking_slider, 80, 25);
+    lv_slider_set_range(motion_shaking_slider, 10, 50);  /* 1.0 - 5.0 g */
+    lv_slider_set_value(motion_shaking_slider, (int)(motion_config_get_shaking_threshold() * 10), LV_ANIM_OFF);
+    lv_obj_add_event_cb(motion_shaking_slider, motion_shaking_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    motion_shaking_value = lv_label_create(panel1);
+    update_motion_shaking_value(motion_config_get_shaking_threshold());
+
+    /* Rotating threshold slider (10 - 100 deg/s) */
+    lv_obj_t * rotating_label = lv_label_create(panel1);
+    lv_label_set_text(rotating_label, "Rotating:");
+    motion_rotating_slider = lv_slider_create(panel1);
+    lv_obj_set_size(motion_rotating_slider, 80, 25);
+    lv_slider_set_range(motion_rotating_slider, 10, 100);
+    lv_slider_set_value(motion_rotating_slider, (int)motion_config_get_rotating_threshold(), LV_ANIM_OFF);
+    lv_obj_add_event_cb(motion_rotating_slider, motion_rotating_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    motion_rotating_value = lv_label_create(panel1);
+    update_motion_rotating_value(motion_config_get_rotating_threshold());
+
+    /* Spinning threshold slider (50 - 300 deg/s) */
+    lv_obj_t * spinning_label = lv_label_create(panel1);
+    lv_label_set_text(spinning_label, "Spinning:");
+    motion_spinning_slider = lv_slider_create(panel1);
+    lv_obj_set_size(motion_spinning_slider, 80, 25);
+    lv_slider_set_range(motion_spinning_slider, 50, 300);
+    lv_slider_set_value(motion_spinning_slider, (int)motion_config_get_spinning_threshold(), LV_ANIM_OFF);
+    lv_obj_add_event_cb(motion_spinning_slider, motion_spinning_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    motion_spinning_value = lv_label_create(panel1);
+    update_motion_spinning_value(motion_config_get_spinning_threshold());
+
+    /* Braking threshold slider (1.0 - 10.0 g/s) */
+    lv_obj_t * braking_label = lv_label_create(panel1);
+    lv_label_set_text(braking_label, "Braking:");
+    motion_braking_slider = lv_slider_create(panel1);
+    lv_obj_set_size(motion_braking_slider, 80, 25);
+    lv_slider_set_range(motion_braking_slider, 10, 100);  /* 1.0 - 10.0 g/s */
+    lv_slider_set_value(motion_braking_slider, (int)(motion_config_get_braking_threshold() * 10), LV_ANIM_OFF);
+    lv_obj_add_event_cb(motion_braking_slider, motion_braking_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    motion_braking_value = lv_label_create(panel1);
+    update_motion_braking_value(motion_config_get_braking_threshold());
+
+    /* Reset defaults button */
+    motion_reset_btn = lv_button_create(panel1);
+    lv_obj_set_size(motion_reset_btn, 60, 25);
+    lv_obj_add_event_cb(motion_reset_btn, motion_reset_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * reset_label = lv_label_create(motion_reset_btn);
+    lv_obj_align(reset_label, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(reset_label, "Reset");
+
     static lv_coord_t grid_main_col_dsc[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t grid_main_row_dsc[] = {LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
     lv_obj_set_grid_dsc_array(lv_screen_active(), grid_main_col_dsc, grid_main_row_dsc);
@@ -749,7 +953,19 @@ bool PhoneSettingConf::run(void)
         LV_GRID_CONTENT,  /*18: Sleep Settings label*/
         35,               /*19: Screen off slider row*/
         35,               /*20: Sleep slider row*/
-        30,               /*21: Bottom padding/gap*/
+        LV_GRID_CONTENT,  /*21: Motion Settings label*/
+        LV_GRID_CONTENT,  /*22: Moving label*/
+        30,               /*23: Moving slider row*/
+        LV_GRID_CONTENT,  /*24: Shaking label*/
+        30,               /*25: Shaking slider row*/
+        LV_GRID_CONTENT,  /*26: Rotating label*/
+        30,               /*27: Rotating slider row*/
+        LV_GRID_CONTENT,  /*28: Spinning label*/
+        30,               /*29: Spinning slider row*/
+        LV_GRID_CONTENT,  /*30: Braking label*/
+        30,               /*31: Braking slider row*/
+        35,               /*32: Reset button row*/
+        30,               /*33: Bottom padding/gap*/
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -804,14 +1020,39 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(sleep_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 20, 1);
     lv_obj_set_grid_cell(sleep_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 20, 1);
 
-    // Bottom separator line (row 21) - creates gap at bottom of settings
+    // Motion Settings module (rows 21-32) - labels on separate rows above sliders
+    lv_obj_set_grid_cell(motion_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 21, 1);
+    // Moving: label on row 22, slider+value on row 23
+    lv_obj_set_grid_cell(moving_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 22, 1);
+    lv_obj_set_grid_cell(motion_moving_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 23, 1);
+    lv_obj_set_grid_cell(motion_moving_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 23, 1);
+    // Shaking: label on row 24, slider+value on row 25
+    lv_obj_set_grid_cell(shaking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 24, 1);
+    lv_obj_set_grid_cell(motion_shaking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 25, 1);
+    lv_obj_set_grid_cell(motion_shaking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 25, 1);
+    // Rotating: label on row 26, slider+value on row 27
+    lv_obj_set_grid_cell(rotating_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 26, 1);
+    lv_obj_set_grid_cell(motion_rotating_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 27, 1);
+    lv_obj_set_grid_cell(motion_rotating_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 27, 1);
+    // Spinning: label on row 28, slider+value on row 29
+    lv_obj_set_grid_cell(spinning_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 28, 1);
+    lv_obj_set_grid_cell(motion_spinning_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 29, 1);
+    lv_obj_set_grid_cell(motion_spinning_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 29, 1);
+    // Braking: label on row 30, slider+value on row 31
+    lv_obj_set_grid_cell(braking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 30, 1);
+    lv_obj_set_grid_cell(motion_braking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 31, 1);
+    lv_obj_set_grid_cell(motion_braking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 31, 1);
+    // Reset button on row 32
+    lv_obj_set_grid_cell(motion_reset_btn, LV_GRID_ALIGN_CENTER, 0, 5, LV_GRID_ALIGN_CENTER, 32, 1);
+
+    // Bottom separator line (row 33) - creates gap at bottom of settings
     lv_obj_t *bottom_line = lv_obj_create(panel1);
     lv_obj_set_size(bottom_line, LV_PCT(100), 2);
     lv_obj_set_style_bg_color(bottom_line, lv_color_hex(0x333333), 0);
     lv_obj_set_style_bg_opa(bottom_line, LV_OPA_50, 0);
     lv_obj_set_style_border_width(bottom_line, 0, 0);
     lv_obj_set_style_radius(bottom_line, 0, 0);
-    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 21, 1);
+    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 33, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 
