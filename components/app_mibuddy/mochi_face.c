@@ -2,46 +2,36 @@
  * @file mochi_face.c
  * @brief MochiState Face Rendering - Draw the cute mochi avatar face
  *
- * Uses LVGL canvas for custom drawing of:
+ * Uses LVGL direct layer drawing (LV_EVENT_DRAW_MAIN) for:
  * - Mochi-shaped face with shadow/highlight
  * - Expressive eyes with pupils and sparkles
  * - Multiple mouth types
  * - Blush circles
+ *
+ * This approach uses no separate buffer - draws directly to display's
+ * render layer, allowing full-screen rendering without memory constraints.
  */
 
 #include "mochi_state.h"
 #include "mochi_theme.h"
 #include "esp_log.h"
-#include "esp_system.h"
-#include "esp_heap_caps.h"
 #include <math.h>
 
 static const char *TAG = "mochi_face";
 
 /*===========================================================================
- * Display Dimensions
+ * Display Dimensions - Full Screen!
  *===========================================================================*/
 
 #define DISPLAY_WIDTH   240
 #define DISPLAY_HEIGHT  284
 
-/*===========================================================================
- * Canvas Size Configuration
- * Change CANVAS_SIZE to adjust face size. All dimensions scale automatically.
- * Memory usage: CANVAS_SIZE * CANVAS_SIZE * 2 bytes (RGB565)
- *   80  -> ~12.8KB
- *   100 -> ~20KB
- *   120 -> ~28.8KB
- *   150 -> ~45KB
- *===========================================================================*/
-#define CANVAS_SIZE     120
+/* Drawing area - full screen, no buffer allocation needed */
+#define CANVAS_WIDTH    DISPLAY_WIDTH
+#define CANVAS_HEIGHT   DISPLAY_HEIGHT
 
-/* Canvas dimensions */
-#define CANVAS_WIDTH    CANVAS_SIZE
-#define CANVAS_HEIGHT   CANVAS_SIZE
-
-/* Scale factor: original design was 200x200 */
-#define SCALE(x)        ((x) * CANVAS_SIZE / 200)
+/* Scale factor: original design was 200x200, now scales to fit display */
+#define SCALE(x)        ((x) * 160 / 200)  /* Scale to ~160px face on 240px width */
 
 /* Face dimensions - relative to canvas center */
 #define FACE_CENTER_X   (CANVAS_WIDTH / 2)
@@ -69,13 +59,15 @@ static const char *TAG = "mochi_face";
  * Static Variables
  *===========================================================================*/
 
-static lv_obj_t *s_canvas = NULL;
-static lv_draw_buf_t *s_draw_buf = NULL;
+static lv_obj_t *s_face_obj = NULL;  /* Drawing object (no buffer needed) */
 static bool s_visible = true;
 
 /* Cached params for redraw */
 static mochi_face_params_t s_cached_params;
 static const mochi_theme_t *s_cached_theme = NULL;
+
+/* Forward declaration of draw callback */
+static void face_draw_cb(lv_event_t *e);
 
 /*===========================================================================
  * Drawing Helper Functions
@@ -332,23 +324,28 @@ static void draw_mouth(lv_layer_t *layer, const mochi_face_params_t *p, const mo
 }
 
 /*===========================================================================
- * Canvas Drawing Helper
+ * Draw Event Callback - Direct Layer Drawing
  *===========================================================================*/
 
-static void draw_face_to_canvas(void) {
-    if (s_canvas == NULL || s_cached_theme == NULL) return;
+/**
+ * @brief Draw callback for LV_EVENT_DRAW_MAIN
+ *
+ * This draws directly to the display's render layer - no separate buffer needed!
+ * Called automatically by LVGL when the object needs to be redrawn.
+ */
+static void face_draw_cb(lv_event_t *e) {
+    if (s_cached_theme == NULL) return;
 
-    lv_layer_t layer;
-    lv_canvas_init_layer(s_canvas, &layer);
+    /* Get the layer from the event - this is the display's render layer */
+    lv_layer_t *layer = lv_event_get_layer(e);
+    if (layer == NULL) return;
 
-    /* Draw all face elements */
-    draw_background(&layer, s_cached_theme);
-    draw_face(&layer, &s_cached_params, s_cached_theme);
-    draw_blush(&layer, &s_cached_params, s_cached_theme);
-    draw_eyes(&layer, &s_cached_params, s_cached_theme);
-    draw_mouth(&layer, &s_cached_params, s_cached_theme);
-
-    lv_canvas_finish_layer(s_canvas, &layer);
+    /* Draw all face elements directly to the display layer */
+    draw_background(layer, s_cached_theme);
+    draw_face(layer, &s_cached_params, s_cached_theme);
+    draw_blush(layer, &s_cached_params, s_cached_theme);
+    draw_eyes(layer, &s_cached_params, s_cached_theme);
+    draw_mouth(layer, &s_cached_params, s_cached_theme);
 }
 
 /*===========================================================================
@@ -356,85 +353,61 @@ static void draw_face_to_canvas(void) {
  *===========================================================================*/
 
 void mochi_face_create(lv_obj_t *parent) {
-    if (s_canvas != NULL) {
+    if (s_face_obj != NULL) {
         ESP_LOGW(TAG, "Face already created");
         return;
     }
 
-    uint32_t bytes_needed = CANVAS_WIDTH * CANVAS_HEIGHT * 2;  /* RGB565 = 2 bytes/pixel */
+    ESP_LOGI(TAG, "Creating mochi face with direct layer drawing (%dx%d)", CANVAS_WIDTH, CANVAS_HEIGHT);
+    ESP_LOGI(TAG, "No buffer allocation needed - uses display's render layer");
 
-    /* Log heap status before allocation */
-    ESP_LOGI(TAG, "Creating mochi face canvas (%dx%d)", CANVAS_WIDTH, CANVAS_HEIGHT);
-    ESP_LOGI(TAG, "Buffer needed: %lu bytes (%.1f KB)",
-             (unsigned long)bytes_needed, bytes_needed / 1024.0f);
-    ESP_LOGI(TAG, "Free heap: %lu bytes, largest block: %lu bytes",
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-
-    /* Create draw buffer - RGB565 for efficiency (no transparency)
-     * RGB565 = 2 bytes per pixel, ARGB8888 = 4 bytes per pixel */
-    s_draw_buf = lv_draw_buf_create(CANVAS_WIDTH, CANVAS_HEIGHT, LV_COLOR_FORMAT_RGB565, 0);
-    if (s_draw_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to create draw buffer (%lu bytes needed)",
-                 (unsigned long)bytes_needed);
-        ESP_LOGE(TAG, "Largest free block: %lu bytes - need contiguous memory!",
-                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-        ESP_LOGE(TAG, "Try: reduce CANVAS_SIZE in mochi_face.c (currently %d)", CANVAS_SIZE);
-        return;
-    }
-
-    /* Create canvas */
-    s_canvas = lv_canvas_create(parent);
-    lv_canvas_set_draw_buf(s_canvas, s_draw_buf);
-    lv_obj_set_size(s_canvas, CANVAS_WIDTH, CANVAS_HEIGHT);
-    lv_obj_center(s_canvas);
+    /* Create a simple transparent object that covers the drawing area */
+    s_face_obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(s_face_obj);  /* Remove default styling */
+    lv_obj_set_size(s_face_obj, CANVAS_WIDTH, CANVAS_HEIGHT);
+    lv_obj_center(s_face_obj);
 
     /* Allow click events to pass through to parent */
-    lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_flag(s_face_obj, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_clear_flag(s_face_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Initial fill - white */
-    lv_canvas_fill_bg(s_canvas, lv_color_white(), LV_OPA_COVER);
+    /* Register draw callback - this is where the magic happens!
+     * LVGL will call face_draw_cb with the display's layer when redrawing */
+    lv_obj_add_event_cb(s_face_obj, face_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
 
     s_visible = true;
+
+    ESP_LOGI(TAG, "Face created successfully - full screen rendering enabled!");
 }
 
 void mochi_face_destroy(void) {
-    if (s_canvas == NULL) return;
+    if (s_face_obj == NULL) return;
 
     ESP_LOGI(TAG, "Destroying mochi face");
 
-    lv_obj_delete(s_canvas);
-    s_canvas = NULL;
-
-    if (s_draw_buf != NULL) {
-        lv_draw_buf_destroy(s_draw_buf);
-        s_draw_buf = NULL;
-    }
-
+    lv_obj_delete(s_face_obj);
+    s_face_obj = NULL;
     s_cached_theme = NULL;
 }
 
 void mochi_face_update(const mochi_face_params_t *params, const mochi_theme_t *theme) {
-    if (s_canvas == NULL || params == NULL || theme == NULL) return;
+    if (s_face_obj == NULL || params == NULL || theme == NULL) return;
 
-    /* Cache params for redraw */
+    /* Cache params for redraw - will be used in face_draw_cb */
     memcpy(&s_cached_params, params, sizeof(mochi_face_params_t));
     s_cached_theme = theme;
 
-    /* Draw to canvas */
-    draw_face_to_canvas();
-
-    /* Invalidate to refresh display */
-    lv_obj_invalidate(s_canvas);
+    /* Invalidate triggers LV_EVENT_DRAW_MAIN -> face_draw_cb */
+    lv_obj_invalidate(s_face_obj);
 }
 
 void mochi_face_set_visible(bool visible) {
-    if (s_canvas == NULL) return;
+    if (s_face_obj == NULL) return;
 
     s_visible = visible;
     if (visible) {
-        lv_obj_remove_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_face_obj, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_face_obj, LV_OBJ_FLAG_HIDDEN);
     }
 }
