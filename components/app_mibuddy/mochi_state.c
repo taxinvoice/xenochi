@@ -83,7 +83,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_SMILE, 0.3f,  /* mouth_type, mouth_open */
             0.0f, 0.0f, 0.0f,    /* face_squish, face_offset_y, face_rotation */
             true, true,          /* show_blush, show_sparkles */
-            MOCHI_PARTICLE_FLOAT /* particle_type */
+            MOCHI_PARTICLE_NONE /* particle_type */
         ),
         .audio.enter = MOCHI_SOUND_SD("happy_enter.mp3"),
         .audio.loop = MOCHI_SOUND_SD("happy_loop.mp3"),
@@ -96,7 +96,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_OPEN_SMILE, 0.7f,
             0.05f, 5.0f, 0.0f,
             true, true,
-            MOCHI_PARTICLE_BURST
+            MOCHI_PARTICLE_NONE
         ),
         .audio.loop = MOCHI_BEEP_EMBEDDED(),
     },
@@ -108,7 +108,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_SMALL_O, 0.5f,
             -0.03f, -5.0f, 0.0f,
             false, false,
-            MOCHI_PARTICLE_SWEAT
+            MOCHI_PARTICLE_NONE
         ),
     },
     /* MOCHI_STATE_COOL */
@@ -119,7 +119,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_SMIRK, 0.2f,
             0.0f, 0.0f, 0.0f,
             false, true,
-            MOCHI_PARTICLE_SPARKLE
+            MOCHI_PARTICLE_NONE
         ),
     },
     /* MOCHI_STATE_DIZZY */
@@ -130,7 +130,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_WAVY, 0.4f,
             0.0f, 0.0f, 0.0f,
             false, false,
-            MOCHI_PARTICLE_SPIRAL
+            MOCHI_PARTICLE_NONE
         ),
     },
     /* MOCHI_STATE_PANIC */
@@ -141,7 +141,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_SCREAM, 1.0f,
             0.0f, 0.0f, 0.0f,
             false, false,
-            MOCHI_PARTICLE_SWEAT
+            MOCHI_PARTICLE_NONE
         ),
     },
     /* MOCHI_STATE_SLEEPY */
@@ -152,7 +152,7 @@ static mochi_state_config_t s_state_configs[MOCHI_STATE_MAX] = {
             MOCHI_MOUTH_SMILE, 0.2f,
             0.0f, 3.0f, -3.0f,
             true, false,
-            MOCHI_PARTICLE_ZZZ
+            MOCHI_PARTICLE_NONE
         ),
         .audio.loop = MOCHI_SOUND_SD("sleepy_loop.mp3"),
         .background.image = MOCHI_IMAGE_SD("sleepy_bg.png"),
