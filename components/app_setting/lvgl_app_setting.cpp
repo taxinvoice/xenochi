@@ -38,6 +38,7 @@
 #include "sd_logger.h"
 #include "power_manager.h"
 #include "motion_config.h"
+#include "audio_driver.h"
 
 using namespace std;
 using namespace esp_brookesia::gui;
@@ -98,6 +99,10 @@ static lv_obj_t *motion_spinning_value = NULL;
 static lv_obj_t *motion_braking_slider = NULL;
 static lv_obj_t *motion_braking_value = NULL;
 static lv_obj_t *motion_reset_btn = NULL;
+
+/* Volume settings UI elements */
+static lv_obj_t *volume_slider = NULL;
+static lv_obj_t *volume_value = NULL;
 
 /* External PMU object from AXP2101 driver */
 extern XPowersPMU PMU;
@@ -620,6 +625,35 @@ static void motion_reset_btn_event_cb(lv_event_t *e)
     }
 }
 
+/*===========================================================================
+ * Volume Settings Callbacks
+ *===========================================================================*/
+
+/**
+ * @brief Update volume value display
+ */
+static void update_volume_value(uint8_t vol)
+{
+    if (volume_value != NULL) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", vol);
+        lv_label_set_text(volume_value, buf);
+    }
+}
+
+/**
+ * @brief Volume slider change callback
+ *
+ * @param e LVGL event
+ */
+static void volume_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = (lv_obj_t*)lv_event_get_target(e);
+    uint8_t vol = (uint8_t)lv_slider_get_value(slider);
+    Volume_Adjustment(vol);
+    update_volume_value(vol);
+}
+
 /**
  * @brief Update log size display label
  */
@@ -792,19 +826,31 @@ bool PhoneSettingConf::run(void)
 
     lv_obj_t * Backlight_label = lv_label_create(panel1);
     lv_label_set_text(Backlight_label, "Backlight brightness");
-    Backlight_slider = lv_slider_create(panel1);                                 
-    lv_obj_add_flag(Backlight_slider, LV_OBJ_FLAG_CLICKABLE);    
-    lv_obj_set_size(Backlight_slider, 100, 40);              
-    lv_obj_set_style_radius(Backlight_slider, 3, LV_PART_KNOB);               // Adjust the value for more or less rounding                                            
-    lv_obj_set_style_bg_opa(Backlight_slider, LV_OPA_TRANSP, LV_PART_KNOB);                               
-    // lv_obj_set_style_pad_all(Backlight_slider, 0, LV_PART_KNOB);                                            
-    lv_obj_set_style_bg_color(Backlight_slider, lv_color_hex(0xAAAAAA), LV_PART_KNOB);               
-    lv_obj_set_style_bg_color(Backlight_slider, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);             
-    lv_obj_set_style_outline_width(Backlight_slider, 2, LV_PART_INDICATOR);  
-    lv_obj_set_style_outline_color(Backlight_slider, lv_color_hex(0xD3D3D3), LV_PART_INDICATOR);      
+    Backlight_slider = lv_slider_create(panel1);
+    lv_obj_add_flag(Backlight_slider, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(Backlight_slider, 100, 40);
+    lv_obj_set_style_radius(Backlight_slider, 3, LV_PART_KNOB);               // Adjust the value for more or less rounding
+    lv_obj_set_style_bg_opa(Backlight_slider, LV_OPA_TRANSP, LV_PART_KNOB);
+    // lv_obj_set_style_pad_all(Backlight_slider, 0, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(Backlight_slider, lv_color_hex(0xAAAAAA), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(Backlight_slider, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR);
+    lv_obj_set_style_outline_width(Backlight_slider, 2, LV_PART_INDICATOR);
+    lv_obj_set_style_outline_color(Backlight_slider, lv_color_hex(0xD3D3D3), LV_PART_INDICATOR);
     lv_slider_set_range(Backlight_slider, 5, Backlight_MAX);
     lv_slider_set_value(Backlight_slider, DEFAULT_BACKLIGHT, LV_ANIM_ON);
     lv_obj_add_event_cb(Backlight_slider, Backlight_adjustment_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Volume control section */
+    lv_obj_t * volume_label = lv_label_create(panel1);
+    lv_label_set_text(volume_label, "Volume");
+    lv_obj_add_style(volume_label, &style_text_muted, 0);
+    volume_slider = lv_slider_create(panel1);
+    lv_obj_set_size(volume_slider, 100, 25);
+    lv_slider_set_range(volume_slider, 0, Volume_MAX);
+    lv_slider_set_value(volume_slider, get_audio_volume(), LV_ANIM_OFF);
+    lv_obj_add_event_cb(volume_slider, volume_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    volume_value = lv_label_create(panel1);
+    update_volume_value(get_audio_volume());
 
     /* File Logging section */
     lv_obj_t * logging_label = lv_label_create(panel1);
@@ -948,24 +994,26 @@ bool PhoneSettingConf::run(void)
         40,               /*13: wifi button*/
         LV_GRID_CONTENT,  /*14: Backlight label*/
         40,               /*15: Backlight slider*/
-        LV_GRID_CONTENT,  /*16: Logging label*/
-        35,               /*17: Logging controls*/
-        LV_GRID_CONTENT,  /*18: Sleep Settings label*/
-        35,               /*19: Screen off slider row*/
-        35,               /*20: Sleep slider row*/
-        LV_GRID_CONTENT,  /*21: Motion Settings label*/
-        LV_GRID_CONTENT,  /*22: Moving label*/
-        30,               /*23: Moving slider row*/
-        LV_GRID_CONTENT,  /*24: Shaking label*/
-        30,               /*25: Shaking slider row*/
-        LV_GRID_CONTENT,  /*26: Rotating label*/
-        30,               /*27: Rotating slider row*/
-        LV_GRID_CONTENT,  /*28: Spinning label*/
-        30,               /*29: Spinning slider row*/
-        LV_GRID_CONTENT,  /*30: Braking label*/
-        30,               /*31: Braking slider row*/
-        35,               /*32: Reset button row*/
-        30,               /*33: Bottom padding/gap*/
+        LV_GRID_CONTENT,  /*16: Volume label*/
+        35,               /*17: Volume slider row*/
+        LV_GRID_CONTENT,  /*18: Logging label*/
+        35,               /*19: Logging controls*/
+        LV_GRID_CONTENT,  /*20: Sleep Settings label*/
+        35,               /*21: Screen off slider row*/
+        35,               /*22: Sleep slider row*/
+        LV_GRID_CONTENT,  /*23: Motion Settings label*/
+        LV_GRID_CONTENT,  /*24: Moving label*/
+        30,               /*25: Moving slider row*/
+        LV_GRID_CONTENT,  /*26: Shaking label*/
+        30,               /*27: Shaking slider row*/
+        LV_GRID_CONTENT,  /*28: Rotating label*/
+        30,               /*29: Rotating slider row*/
+        LV_GRID_CONTENT,  /*30: Spinning label*/
+        30,               /*31: Spinning slider row*/
+        LV_GRID_CONTENT,  /*32: Braking label*/
+        30,               /*33: Braking slider row*/
+        35,               /*34: Reset button row*/
+        30,               /*35: Bottom padding/gap*/
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -1005,54 +1053,59 @@ bool PhoneSettingConf::run(void)
     lv_obj_set_grid_cell(Backlight_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 14, 1);
     lv_obj_set_grid_cell(Backlight_slider, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 15, 1);
 
-    // File Logging module (rows 16-17)
-    lv_obj_set_grid_cell(logging_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 16, 1);
-    lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 17, 1);
-    lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 17, 1);
-    lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 17, 1);
+    // Volume module (rows 16-17)
+    lv_obj_set_grid_cell(volume_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 16, 1);
+    lv_obj_set_grid_cell(volume_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 17, 1);
+    lv_obj_set_grid_cell(volume_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 17, 1);
 
-    // Sleep Settings module (rows 18-20)
-    lv_obj_set_grid_cell(sleep_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 18, 1);
-    lv_obj_set_grid_cell(screen_off_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 19, 1);
-    lv_obj_set_grid_cell(screen_off_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 19, 1);
-    lv_obj_set_grid_cell(screen_off_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 19, 1);
-    lv_obj_set_grid_cell(sleep_timeout_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 20, 1);
-    lv_obj_set_grid_cell(sleep_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 20, 1);
-    lv_obj_set_grid_cell(sleep_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 20, 1);
+    // File Logging module (rows 18-19)
+    lv_obj_set_grid_cell(logging_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 18, 1);
+    lv_obj_set_grid_cell(logging_switch, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 19, 1);
+    lv_obj_set_grid_cell(logging_size_label, LV_GRID_ALIGN_CENTER, 1, 2, LV_GRID_ALIGN_CENTER, 19, 1);
+    lv_obj_set_grid_cell(but_clear_logs, LV_GRID_ALIGN_END, 3, 2, LV_GRID_ALIGN_CENTER, 19, 1);
 
-    // Motion Settings module (rows 21-32) - labels on separate rows above sliders
-    lv_obj_set_grid_cell(motion_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 21, 1);
-    // Moving: label on row 22, slider+value on row 23
-    lv_obj_set_grid_cell(moving_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 22, 1);
-    lv_obj_set_grid_cell(motion_moving_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 23, 1);
-    lv_obj_set_grid_cell(motion_moving_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 23, 1);
-    // Shaking: label on row 24, slider+value on row 25
-    lv_obj_set_grid_cell(shaking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 24, 1);
-    lv_obj_set_grid_cell(motion_shaking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 25, 1);
-    lv_obj_set_grid_cell(motion_shaking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 25, 1);
-    // Rotating: label on row 26, slider+value on row 27
-    lv_obj_set_grid_cell(rotating_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 26, 1);
-    lv_obj_set_grid_cell(motion_rotating_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 27, 1);
-    lv_obj_set_grid_cell(motion_rotating_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 27, 1);
-    // Spinning: label on row 28, slider+value on row 29
-    lv_obj_set_grid_cell(spinning_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 28, 1);
-    lv_obj_set_grid_cell(motion_spinning_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 29, 1);
-    lv_obj_set_grid_cell(motion_spinning_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 29, 1);
-    // Braking: label on row 30, slider+value on row 31
-    lv_obj_set_grid_cell(braking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 30, 1);
-    lv_obj_set_grid_cell(motion_braking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 31, 1);
-    lv_obj_set_grid_cell(motion_braking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 31, 1);
-    // Reset button on row 32
-    lv_obj_set_grid_cell(motion_reset_btn, LV_GRID_ALIGN_CENTER, 0, 5, LV_GRID_ALIGN_CENTER, 32, 1);
+    // Sleep Settings module (rows 20-22)
+    lv_obj_set_grid_cell(sleep_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 20, 1);
+    lv_obj_set_grid_cell(screen_off_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 21, 1);
+    lv_obj_set_grid_cell(screen_off_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 21, 1);
+    lv_obj_set_grid_cell(screen_off_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 21, 1);
+    lv_obj_set_grid_cell(sleep_timeout_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 22, 1);
+    lv_obj_set_grid_cell(sleep_slider, LV_GRID_ALIGN_STRETCH, 1, 3, LV_GRID_ALIGN_CENTER, 22, 1);
+    lv_obj_set_grid_cell(sleep_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 22, 1);
 
-    // Bottom separator line (row 33) - creates gap at bottom of settings
+    // Motion Settings module (rows 23-34) - labels on separate rows above sliders
+    lv_obj_set_grid_cell(motion_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_START, 23, 1);
+    // Moving: label on row 24, slider+value on row 25
+    lv_obj_set_grid_cell(moving_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 24, 1);
+    lv_obj_set_grid_cell(motion_moving_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 25, 1);
+    lv_obj_set_grid_cell(motion_moving_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 25, 1);
+    // Shaking: label on row 26, slider+value on row 27
+    lv_obj_set_grid_cell(shaking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 26, 1);
+    lv_obj_set_grid_cell(motion_shaking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 27, 1);
+    lv_obj_set_grid_cell(motion_shaking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 27, 1);
+    // Rotating: label on row 28, slider+value on row 29
+    lv_obj_set_grid_cell(rotating_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 28, 1);
+    lv_obj_set_grid_cell(motion_rotating_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 29, 1);
+    lv_obj_set_grid_cell(motion_rotating_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 29, 1);
+    // Spinning: label on row 30, slider+value on row 31
+    lv_obj_set_grid_cell(spinning_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 30, 1);
+    lv_obj_set_grid_cell(motion_spinning_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 31, 1);
+    lv_obj_set_grid_cell(motion_spinning_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 31, 1);
+    // Braking: label on row 32, slider+value on row 33
+    lv_obj_set_grid_cell(braking_label, LV_GRID_ALIGN_START, 0, 5, LV_GRID_ALIGN_CENTER, 32, 1);
+    lv_obj_set_grid_cell(motion_braking_slider, LV_GRID_ALIGN_STRETCH, 0, 4, LV_GRID_ALIGN_CENTER, 33, 1);
+    lv_obj_set_grid_cell(motion_braking_value, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 33, 1);
+    // Reset button on row 34
+    lv_obj_set_grid_cell(motion_reset_btn, LV_GRID_ALIGN_CENTER, 0, 5, LV_GRID_ALIGN_CENTER, 34, 1);
+
+    // Bottom separator line (row 35) - creates gap at bottom of settings
     lv_obj_t *bottom_line = lv_obj_create(panel1);
     lv_obj_set_size(bottom_line, LV_PCT(100), 2);
     lv_obj_set_style_bg_color(bottom_line, lv_color_hex(0x333333), 0);
     lv_obj_set_style_bg_opa(bottom_line, LV_OPA_50, 0);
     lv_obj_set_style_border_width(bottom_line, 0, 0);
     lv_obj_set_style_radius(bottom_line, 0, 0);
-    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 33, 1);
+    lv_obj_set_grid_cell(bottom_line, LV_GRID_ALIGN_STRETCH, 0, 5, LV_GRID_ALIGN_CENTER, 35, 1);
 
     auto_step_timer = lv_timer_create(example1_increase_lvgl_tick, 1000, NULL);
 

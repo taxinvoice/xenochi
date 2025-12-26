@@ -2259,6 +2259,12 @@ CONFIG_MIBUDDY_STATE_HOLD_MS=1500
 # end of MiBuddy Configuration
 
 #
+# Audio Playback Configuration
+#
+CONFIG_AUDIO_DEFAULT_VOLUME=10
+# end of Audio Playback Configuration
+
+#
 # Net API Configuration
 #
 CONFIG_NET_API_TIMEOUT_MS=10000

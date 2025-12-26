@@ -30,7 +30,7 @@ static const char *TAG = "audio play";
  * Module State Variables
  *===========================================================================*/
 
-static uint8_t Volume = PLAYER_VOLUME;      /**< Current volume level (0-100) */
+static uint8_t Volume = CONFIG_AUDIO_DEFAULT_VOLUME;  /**< Current volume level (0-100), from Kconfig */
 static esp_asp_handle_t handle = NULL;       /**< Audio Simple Player handle */
 static TaskHandle_t xHandle;                 /**< Player task handle */
 static FILE *audio_file = NULL;              /**< Current audio file handle for SPI-safe reading */
@@ -517,7 +517,10 @@ void Audio_Play_Init(void)
     xTaskCreate(player_task, "player_task", 2048, NULL, 5, &xHandle);
 
     audio_initialized = true;
-    ESP_LOGI(TAG, "Audio playback system initialized");
+
+    /* Set initial volume from Kconfig default */
+    Volume_Adjustment(CONFIG_AUDIO_DEFAULT_VOLUME);
+    ESP_LOGI(TAG, "Audio playback system initialized, volume=%d", CONFIG_AUDIO_DEFAULT_VOLUME);
 }
 
 /**
@@ -606,6 +609,10 @@ esp_gmf_err_t Audio_Play_PCM(const int16_t *pcm_data, size_t samples,
         ESP_LOGE(TAG, "Failed to prepare codec for PCM: %s", esp_err_to_name(prep_ret));
         return ESP_GMF_ERR_FAIL;
     }
+
+    /* Restore user-set volume (esp_audio_prepare_for_pcm sets hardcoded PLAYER_VOLUME) */
+    esp_audio_set_play_vol(Volume);
+    ESP_LOGI(TAG, "Volume set to user level: %d", Volume);
 
     /* Enable power amplifier and wait for it to stabilize */
     Audio_PA_EN();

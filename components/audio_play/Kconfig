@@ -1,0 +1,12 @@
+menu "Audio Playback Configuration"
+
+    config AUDIO_DEFAULT_VOLUME
+        int "Default audio volume (0-100)"
+        default 10
+        range 0 100
+        help
+            The default audio volume level on boot.
+            Range is 0 (mute) to 100 (maximum).
+            Default is 10 for a moderate starting volume.
+
+endmenu
