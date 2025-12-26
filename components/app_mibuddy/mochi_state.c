@@ -638,6 +638,10 @@ void mochi_resume(void) {
     apply_state();
 }
 
+void mochi_set_visible(bool visible) {
+    mochi_face_set_visible(visible);
+}
+
 /*===========================================================================
  * Public API - Audio
  *===========================================================================*/

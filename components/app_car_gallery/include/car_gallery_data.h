@@ -2,23 +2,35 @@
  * @file car_gallery_data.h
  * @brief Car Animation Gallery - Animation catalog definitions
  *
- * Defines 32 car-themed animations with their mochi states, activities,
- * and trigger descriptions for future car integration.
+ * Defines 68 animations total:
+ * - 32 car-themed face animations using mochi states
+ * - 36 creative non-face animations using custom rendering
  */
 #pragma once
 
 #include <stdint.h>
 #include "mochi_state.h"
+#include "gallery_animations.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*===========================================================================
+ * Animation Types
+ *===========================================================================*/
+
+typedef enum {
+    ANIM_TYPE_FACE = 0,      /**< Uses mochi face system */
+    ANIM_TYPE_CUSTOM,        /**< Uses gallery_animations custom rendering */
+} animation_type_t;
+
+/*===========================================================================
  * Animation Categories
  *===========================================================================*/
 
 typedef enum {
+    /* Face animation categories (0-6) */
     CAR_CAT_ENGINE = 0,      /**< Engine/Startup states */
     CAR_CAT_DRIVING,         /**< Driving dynamics */
     CAR_CAT_SPEED,           /**< Speed zones */
@@ -26,6 +38,15 @@ typedef enum {
     CAR_CAT_PARKING,         /**< Parking/Maneuvers */
     CAR_CAT_SAFETY,          /**< Safety alerts */
     CAR_CAT_ENTERTAINMENT,   /**< Entertainment/Mood */
+
+    /* Custom animation categories (7-12) */
+    CAR_CAT_GEOMETRIC,       /**< Abstract Geometric */
+    CAR_CAT_WEATHER,         /**< Weather Effects */
+    CAR_CAT_SYMBOLS,         /**< Emoji/Symbols */
+    CAR_CAT_TECH,            /**< Tech/Digital */
+    CAR_CAT_NATURE,          /**< Nature/Organic */
+    CAR_CAT_DASHBOARD,       /**< Dashboard/Automotive */
+
     CAR_CAT_ALL,             /**< Show all (no filter) */
     CAR_CAT_MAX
 } car_category_t;
@@ -39,11 +60,17 @@ typedef enum {
  */
 typedef struct {
     const char *name;              /**< Display name (e.g., "Ignition") */
+    animation_type_t type;         /**< ANIM_TYPE_FACE or ANIM_TYPE_CUSTOM */
+    car_category_t category;       /**< Category for filtering */
+    const char *trigger_desc;      /**< Human-readable description */
+
+    /* Face animation params (only valid when type == ANIM_TYPE_FACE) */
     mochi_state_t state;           /**< Mochi emotional state */
     mochi_activity_t activity;     /**< Mochi animation activity */
     mochi_theme_id_t theme;        /**< Suggested color theme */
-    const char *trigger_desc;      /**< Human-readable trigger description */
-    car_category_t category;       /**< Category for filtering */
+
+    /* Custom animation params (only valid when type == ANIM_TYPE_CUSTOM) */
+    gallery_anim_id_t custom_id;   /**< Custom animation ID */
 } car_animation_t;
 
 /*===========================================================================

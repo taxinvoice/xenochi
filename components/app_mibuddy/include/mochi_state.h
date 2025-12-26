@@ -322,6 +322,15 @@ void mochi_pause(void);
  */
 void mochi_resume(void);
 
+/**
+ * @brief Set mochi visibility
+ *
+ * Shows or hides the mochi face drawing object.
+ *
+ * @param visible true to show, false to hide
+ */
+void mochi_set_visible(bool visible);
+
 /*===========================================================================
  * Public API - Audio (Optional)
  *===========================================================================*/

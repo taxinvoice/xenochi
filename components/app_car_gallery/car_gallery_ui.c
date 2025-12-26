@@ -15,6 +15,7 @@
  */
 
 #include "car_gallery_data.h"
+#include "gallery_animations.h"
 #include "mochi_state.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -55,8 +56,9 @@ static lv_obj_t *s_category_overlay = NULL;
 /* Gallery state */
 static int s_current_idx = 0;
 static car_category_t s_current_category = CAR_CAT_ALL;
-static uint8_t s_filtered_indices[32];
+static uint8_t s_filtered_indices[68];  /* 32 face + 36 custom animations */
 static int s_filtered_count = 0;
+static animation_type_t s_current_type = ANIM_TYPE_FACE;
 
 /* Styles */
 static lv_style_t s_style_header;
@@ -352,17 +354,40 @@ static void apply_current_animation(void)
     int actual_idx = s_filtered_indices[s_current_idx];
     const car_animation_t *anim = &car_gallery_get_animations()[actual_idx];
 
-    /* Set mochi state */
-    mochi_set_theme(anim->theme);
-    mochi_set(anim->state, anim->activity);
+    /* Handle animation type switching */
+    if (anim->type != s_current_type) {
+        if (anim->type == ANIM_TYPE_FACE) {
+            /* Switching to face animation - hide custom, show mochi */
+            gallery_anim_set_visible(false);
+            mochi_set_visible(true);
+        } else {
+            /* Switching to custom animation - hide mochi, show custom */
+            mochi_set_visible(false);
+            gallery_anim_set_visible(true);
+        }
+        s_current_type = anim->type;
+    }
+
+    /* Apply animation-specific settings */
+    if (anim->type == ANIM_TYPE_FACE) {
+        /* Set mochi state */
+        mochi_set_theme(anim->theme);
+        mochi_set(anim->state, anim->activity);
+        ESP_LOGI(TAG, "Face %d: %s (%s + %s)",
+                 s_current_idx + 1, anim->name,
+                 mochi_state_name(anim->state),
+                 mochi_activity_name(anim->activity));
+    } else {
+        /* Set custom animation */
+        gallery_anim_set(anim->custom_id);
+        const gallery_anim_info_t *info = gallery_anim_get_info(anim->custom_id);
+        ESP_LOGI(TAG, "Custom %d: %s (%s)",
+                 s_current_idx + 1, anim->name,
+                 info ? info->name : "unknown");
+    }
 
     /* Update labels */
     update_ui_labels();
-
-    ESP_LOGI(TAG, "Animation %d: %s (%s + %s)",
-             s_current_idx + 1, anim->name,
-             mochi_state_name(anim->state),
-             mochi_activity_name(anim->activity));
 }
 
 static void update_ui_labels(void)
@@ -376,14 +401,19 @@ static void update_ui_labels(void)
     lv_label_set_text(s_title_label, anim->name);
 
     /* Counter */
-    char buf[16];
+    char buf[32];
     snprintf(buf, sizeof(buf), "%d/%d", s_current_idx + 1, s_filtered_count);
     lv_label_set_text(s_counter_label, buf);
 
-    /* State info */
-    snprintf(buf, sizeof(buf), "%s + %s",
-             mochi_state_name(anim->state),
-             mochi_activity_name(anim->activity));
+    /* State info - different format for face vs custom */
+    if (anim->type == ANIM_TYPE_FACE) {
+        snprintf(buf, sizeof(buf), "%s + %s",
+                 mochi_state_name(anim->state),
+                 mochi_activity_name(anim->activity));
+    } else {
+        /* Show category for custom animations */
+        snprintf(buf, sizeof(buf), "%s", car_gallery_category_name(anim->category));
+    }
     lv_label_set_text(s_state_label, buf);
 
     /* Trigger */
@@ -399,6 +429,7 @@ int car_gallery_ui_init(lv_obj_t *parent)
     ESP_LOGI(TAG, "Initializing gallery UI");
 
     s_screen = parent;
+    s_current_type = ANIM_TYPE_FACE;  /* Start with face animations */
     init_styles();
 
     /* Create mochi FIRST on screen - it renders behind UI elements
@@ -408,6 +439,14 @@ int car_gallery_ui_init(lv_obj_t *parent)
         ESP_LOGE(TAG, "Failed to create mochi: %d", err);
         return -1;
     }
+
+    /* Initialize gallery animations module (for custom non-face animations) */
+    if (gallery_anim_init(parent) != 0) {
+        ESP_LOGE(TAG, "Failed to init gallery animations");
+        /* Continue anyway - face animations will still work */
+    }
+    /* Start with gallery_anim hidden (face animations visible first) */
+    gallery_anim_set_visible(false);
 
     /* Create UI elements directly on screen (no blocking container)
      * Elements are created AFTER mochi so they render on top */
@@ -432,6 +471,9 @@ void car_gallery_ui_deinit(void)
     ESP_LOGI(TAG, "Deinitializing gallery UI");
 
     close_category_picker();
+
+    /* Cleanup gallery animations module */
+    gallery_anim_deinit();
 
     /* Delete UI elements (mochi is cleaned up by app's close/back) */
     if (s_header) {
@@ -459,6 +501,9 @@ void car_gallery_ui_deinit(void)
     s_counter_label = NULL;
     s_state_label = NULL;
     s_trigger_label = NULL;
+
+    /* Reset gallery state */
+    s_current_type = ANIM_TYPE_FACE;
 }
 
 void car_gallery_next(void)
