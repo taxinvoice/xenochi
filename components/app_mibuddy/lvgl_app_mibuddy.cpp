@@ -39,10 +39,25 @@ extern "C" {
     extern const size_t chime_16k_mono_len;
     extern const uint32_t chime_16k_mono_sample_rate;
 
-    /* "Weee hahaha" voice - 16kHz, ~7.3s */
+    /* "Weee" sound for extreme roll - 16kHz */
     extern const int16_t weee_hahaha_16k[];
     extern const size_t weee_hahaha_16k_len;
     extern const uint32_t weee_hahaha_16k_sample_rate;
+
+    /* Braking/caught sound - 16kHz */
+    extern const int16_t sound_braking[];
+    extern const size_t sound_braking_len;
+    extern const uint32_t sound_braking_sample_rate;
+
+    /* Face down/sleepy sound - 16kHz */
+    extern const int16_t sound_face_down[];
+    extern const size_t sound_face_down_len;
+    extern const uint32_t sound_face_down_sample_rate;
+
+    /* Low battery warning sound - 16kHz */
+    extern const int16_t sound_low_battery[];
+    extern const size_t sound_low_battery_len;
+    extern const uint32_t sound_low_battery_sample_rate;
 }
 
 
@@ -106,13 +121,13 @@ uint32_t mibuddy_get_input_interval(void)
  *
  *  Priority | Condition              | State    | Activity    | Sound
  *  ---------|------------------------|----------|-------------|---------------
- *  1        | is_braking             | SHOCKED  | IDLE        | -
- *  2        | is_face_down           | SLEEPY   | SNORE       | -
+ *  1        | is_braking             | SHOCKED  | IDLE        | braking (edge)
+ *  2        | is_face_down           | SLEEPY   | SNORE       | face_down (edge)
  *  3a       | roll < 55° (extreme L) | EXCITED  | SLIDE_LEFT  | weee (edge)
  *  3b       | roll < 65° (normal L)  | HAPPY    | SLIDE_LEFT  | -
  *  4a       | roll > 125° (extreme R)| EXCITED  | SLIDE_RIGHT | weee (edge)
  *  4b       | roll > 115° (normal R) | HAPPY    | SLIDE_RIGHT | -
- *  5        | is_low_battery         | WORRIED  | IDLE        | -
+ *  5        | is_low_battery         | WORRIED  | IDLE        | low_battery (edge)
  *  6        | (default)              | HAPPY    | IDLE        | -
  *
  * ROLL ANGLE ZONES (baseline = 90°):
@@ -136,6 +151,11 @@ static void default_input_mapper(
     mochi_state_t *out_state,
     mochi_activity_t *out_activity)
 {
+    /* Edge-trigger state for sounds */
+    static bool s_braking_sound_played = false;
+    static bool s_face_down_sound_played = false;
+    static bool s_low_battery_sound_played = false;
+
     /* Log motion state for testing */
     ESP_LOGI("TEST", "braking:%d delta:%.1f roll:%.1f low_batt:%d",
              input->is_braking, input->accel_delta_per_sec,
@@ -143,17 +163,31 @@ static void default_input_mapper(
 
     /* 1. Braking (catching device) */
     if (input->is_braking) {
+        if (!s_braking_sound_played) {
+            ESP_LOGI("SOUND", ">>> Braking detected! Playing sound...");
+            mochi_sound_asset_t snd = MOCHI_SOUND_EMBEDDED(sound_braking, sound_braking_len, sound_braking_sample_rate);
+            mochi_play_asset_sound(&snd, false);
+            s_braking_sound_played = true;
+        }
         *out_state = MOCHI_STATE_SHOCKED;
         *out_activity = MOCHI_ACTIVITY_IDLE;
         return;
     }
+    s_braking_sound_played = false;  /* Reset when not braking */
 
     /* 2. Face down */
     if (input->is_face_down) {
+        if (!s_face_down_sound_played) {
+            ESP_LOGI("SOUND", ">>> Face down! Playing sound...");
+            mochi_sound_asset_t snd = MOCHI_SOUND_EMBEDDED(sound_face_down, sound_face_down_len, sound_face_down_sample_rate);
+            mochi_play_asset_sound(&snd, false);
+            s_face_down_sound_played = true;
+        }
         *out_state = MOCHI_STATE_SLEEPY;
         *out_activity = MOCHI_ACTIVITY_SNORE;
         return;
     }
+    s_face_down_sound_played = false;  /* Reset when not face down */
 
     /* 3-4. Roll tilt with two-tier detection (skip if face down/up) */
     static bool s_extreme_left_active = false;
@@ -210,10 +244,17 @@ static void default_input_mapper(
 
     /* 5. Low battery */
     if (input->is_low_battery) {
+        if (!s_low_battery_sound_played) {
+            ESP_LOGI("SOUND", ">>> Low battery! Playing warning sound...");
+            mochi_sound_asset_t snd = MOCHI_SOUND_EMBEDDED(sound_low_battery, sound_low_battery_len, sound_low_battery_sample_rate);
+            mochi_play_asset_sound(&snd, false);
+            s_low_battery_sound_played = true;
+        }
         *out_state = MOCHI_STATE_WORRIED;
         *out_activity = MOCHI_ACTIVITY_IDLE;
         return;
     }
+    s_low_battery_sound_played = false;  /* Reset when battery OK */
 
     /* 6. Default */
     *out_state = MOCHI_STATE_HAPPY;

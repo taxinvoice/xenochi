@@ -1,4 +1,4 @@
-# Sound assets: beep_8k_mono.c, chime_16k_mono.c, weee_hahaha_16k.c
+# Sound assets: beep_8k_mono.c, weee_hahaha_16k.c, sound_braking.c, sound_face_down.c, sound_low_battery.c
 file(GLOB_RECURSE SRCS
 "${CMAKE_CURRENT_SOURCE_DIR}/*.c"
 "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
