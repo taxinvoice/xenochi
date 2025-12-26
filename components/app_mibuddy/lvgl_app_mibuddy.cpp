@@ -99,9 +99,37 @@ uint32_t mibuddy_get_input_interval(void)
 }
 
 /**
- * @brief Simplified test mapper - minimal conditions for testing motion thresholds
+ * @brief Default input mapper - Maps sensor inputs to mochi state/activity
  *
- * Priority: braking > face_down > roll_left > roll_right > low_battery > default
+ * STATE MACHINE LOGIC (evaluated in priority order, first match wins):
+ * ============================================================================
+ *
+ *  Priority | Condition              | State    | Activity    | Sound
+ *  ---------|------------------------|----------|-------------|---------------
+ *  1        | is_braking             | SHOCKED  | IDLE        | -
+ *  2        | is_face_down           | SLEEPY   | SNORE       | -
+ *  3a       | roll < 55° (extreme L) | EXCITED  | SLIDE_LEFT  | weee (edge)
+ *  3b       | roll < 65° (normal L)  | HAPPY    | SLIDE_LEFT  | -
+ *  4a       | roll > 125° (extreme R)| EXCITED  | SLIDE_RIGHT | weee (edge)
+ *  4b       | roll > 115° (normal R) | HAPPY    | SLIDE_RIGHT | -
+ *  5        | is_low_battery         | WORRIED  | IDLE        | -
+ *  6        | (default)              | HAPPY    | IDLE        | -
+ *
+ * ROLL ANGLE ZONES (baseline = 90°):
+ * ============================================================================
+ *
+ *     0°        55°    65°    90°   115°   125°       180°
+ *     |----------|------|------|------|------|---------|
+ *     | EXTREME  |NORMAL| neutral zone |NORMAL|EXTREME |
+ *     |  LEFT    | LEFT |   (no roll)  |RIGHT | RIGHT  |
+ *     | +sound   |      |              |      | +sound |
+ *     | EXCITED  |HAPPY |    HAPPY     |HAPPY |EXCITED |
+ *
+ * EDGE-TRIGGERED SOUNDS:
+ * ============================================================================
+ *   - Sound plays ONCE when entering extreme zone (not continuously)
+ *   - Resets when returning to normal roll zone (allows re-trigger)
+ *   - Separate tracking for left/right to allow independent triggers
  */
 static void default_input_mapper(
     const mochi_input_state_t *input,
