@@ -127,32 +127,58 @@ static void default_input_mapper(
         return;
     }
 
-    /* 3-4. Roll tilt (skip if face down/up) */
-    static bool s_left_roll_active = false;  /* Track if left roll was active last frame */
+    /* 3-4. Roll tilt with two-tier detection (skip if face down/up) */
+    static bool s_extreme_left_active = false;
+    static bool s_extreme_right_active = false;
+
     if (!input->is_face_down && !input->is_face_up) {
         const float ROLL_BASELINE = 90.0f;
-        const float ROLL_THRESHOLD = 25.0f;
+        const float ROLL_THRESHOLD = 25.0f;         /* Normal roll threshold */
+        const float ROLL_EXTREME_THRESHOLD = 35.0f; /* Extreme roll (plays sound) */
+
+        /* Left roll detection */
         if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {
-            /* Play "weee hahaha" sound on left roll entry (edge trigger) */
-            if (!s_left_roll_active) {
-                ESP_LOGI("SOUND", ">>> Left roll triggered! Playing weee hahaha...");
-                mochi_sound_asset_t weee = MOCHI_SOUND_EMBEDDED(weee_hahaha_16k, weee_hahaha_16k_len, weee_hahaha_16k_sample_rate);
-                esp_err_t ret = mochi_play_asset_sound(&weee, false);
-                ESP_LOGI("SOUND", ">>> mochi_play_asset_sound returned: %d (%s)", ret, esp_err_to_name(ret));
-                s_left_roll_active = true;
+            /* Check for extreme left roll */
+            if (input->roll < ROLL_BASELINE - ROLL_EXTREME_THRESHOLD) {
+                /* Play sound on extreme left entry (edge trigger) */
+                if (!s_extreme_left_active) {
+                    ESP_LOGI("SOUND", ">>> Extreme left roll! Playing weee...");
+                    mochi_sound_asset_t weee = MOCHI_SOUND_EMBEDDED(weee_hahaha_16k, weee_hahaha_16k_len, weee_hahaha_16k_sample_rate);
+                    mochi_play_asset_sound(&weee, false);
+                    s_extreme_left_active = true;
+                }
+                *out_state = MOCHI_STATE_EXCITED;
+            } else {
+                *out_state = MOCHI_STATE_HAPPY;
+                s_extreme_left_active = false;  /* Reset when back to normal roll */
             }
-            *out_state = MOCHI_STATE_HAPPY;
             *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
             return;
         }
+
+        /* Right roll detection */
         if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {
-            s_left_roll_active = false;  /* Reset when in right roll */
-            *out_state = MOCHI_STATE_HAPPY;
+            /* Check for extreme right roll */
+            if (input->roll > ROLL_BASELINE + ROLL_EXTREME_THRESHOLD) {
+                /* Play sound on extreme right entry (edge trigger) */
+                if (!s_extreme_right_active) {
+                    ESP_LOGI("SOUND", ">>> Extreme right roll! Playing weee...");
+                    mochi_sound_asset_t weee = MOCHI_SOUND_EMBEDDED(weee_hahaha_16k, weee_hahaha_16k_len, weee_hahaha_16k_sample_rate);
+                    mochi_play_asset_sound(&weee, false);
+                    s_extreme_right_active = true;
+                }
+                *out_state = MOCHI_STATE_EXCITED;
+            } else {
+                *out_state = MOCHI_STATE_HAPPY;
+                s_extreme_right_active = false;  /* Reset when back to normal roll */
+            }
             *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
             return;
         }
     }
-    s_left_roll_active = false;  /* Reset when not tilted */
+    /* Reset both when not tilted */
+    s_extreme_left_active = false;
+    s_extreme_right_active = false;
 
     /* 5. Low battery */
     if (input->is_low_battery) {
