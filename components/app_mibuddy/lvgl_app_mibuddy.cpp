@@ -24,7 +24,26 @@
 #include "app_mibuddy_assets.h"
 #include "mochi_state.h"
 #include "mochi_input.h"
+#include "mochi_assets.h"
 #include "audio_driver.h"
+
+/* External sounds */
+extern "C" {
+    /* Short beep - 8kHz, ~100ms */
+    extern const int16_t beep_8k_mono[];
+    extern const size_t beep_8k_mono_len;
+    extern const uint32_t beep_8k_mono_sample_rate;
+
+    /* Two-tone chime - 16kHz, ~400ms */
+    extern const int16_t chime_16k_mono[];
+    extern const size_t chime_16k_mono_len;
+    extern const uint32_t chime_16k_mono_sample_rate;
+
+    /* "Weee hahaha" voice - 16kHz, ~7.3s */
+    extern const int16_t weee_hahaha_16k[];
+    extern const size_t weee_hahaha_16k_len;
+    extern const uint32_t weee_hahaha_16k_sample_rate;
+}
 
 
 using namespace std;
@@ -109,20 +128,31 @@ static void default_input_mapper(
     }
 
     /* 3-4. Roll tilt (skip if face down/up) */
+    static bool s_left_roll_active = false;  /* Track if left roll was active last frame */
     if (!input->is_face_down && !input->is_face_up) {
         const float ROLL_BASELINE = 90.0f;
         const float ROLL_THRESHOLD = 25.0f;
         if (input->roll < ROLL_BASELINE - ROLL_THRESHOLD) {
+            /* Play "weee hahaha" sound on left roll entry (edge trigger) */
+            if (!s_left_roll_active) {
+                ESP_LOGI("SOUND", ">>> Left roll triggered! Playing weee hahaha...");
+                mochi_sound_asset_t weee = MOCHI_SOUND_EMBEDDED(weee_hahaha_16k, weee_hahaha_16k_len, weee_hahaha_16k_sample_rate);
+                esp_err_t ret = mochi_play_asset_sound(&weee, false);
+                ESP_LOGI("SOUND", ">>> mochi_play_asset_sound returned: %d (%s)", ret, esp_err_to_name(ret));
+                s_left_roll_active = true;
+            }
             *out_state = MOCHI_STATE_HAPPY;
             *out_activity = MOCHI_ACTIVITY_SLIDE_LEFT;
             return;
         }
         if (input->roll > ROLL_BASELINE + ROLL_THRESHOLD) {
+            s_left_roll_active = false;  /* Reset when in right roll */
             *out_state = MOCHI_STATE_HAPPY;
             *out_activity = MOCHI_ACTIVITY_SLIDE_RIGHT;
             return;
         }
     }
+    s_left_roll_active = false;  /* Reset when not tilted */
 
     /* 5. Low battery */
     if (input->is_low_battery) {
@@ -403,7 +433,7 @@ bool PhoneMiBuddyConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
 
-    /* Initialize audio system before mochi (which may play sounds) */
+    /* Initialize audio system (required for embedded PCM playback) */
     Audio_Play_Init();
 
     /* Create debug overlay */

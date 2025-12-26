@@ -336,6 +336,30 @@ esp_err_t esp_audio_get_play_vol(int *volume);
 esp_err_t esp_audio_play(const int16_t* data, int length, uint32_t ticks_to_wait);
 
 /**
+ * @brief Ensure DAC output is unmuted before playback
+ * @return ESP_OK on success
+ */
+esp_err_t esp_audio_unmute(void);
+
+/**
+ * @brief Prepare codec for direct PCM playback
+ *
+ * Closes and re-opens the codec device to ensure it's in the correct state
+ * for direct esp_audio_play() calls (not via ESP Audio Simple Player).
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t esp_audio_prepare_for_pcm(void);
+
+/**
+ * @brief Reset audio play logging flag
+ *
+ * Resets the first-call logging flag so detailed debug info is logged
+ * on the next esp_audio_play() call.
+ */
+void esp_audio_reset_log_flag(void);
+
+/**
  * @brief Get audio feed data from microphone
  * @param is_get_raw_channel Get raw channel data flag
  * @param[out] buffer Buffer to store audio samples

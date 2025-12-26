@@ -232,11 +232,56 @@ esp_err_t bsp_codec_deinit(void)
     return ret_val;
 }
 
+/**
+ * @brief Ensure DAC output is unmuted before playback
+ */
+esp_err_t esp_audio_unmute(void)
+{
+    if (!play_dev) {
+        ESP_LOGE(TAG, "esp_audio_unmute: play_dev is NULL!");
+        return ESP_FAIL;
+    }
+    int ret = esp_codec_dev_set_out_mute(play_dev, false);
+    ESP_LOGI(TAG, "Codec unmuted, ret=%d", ret);
+    return (ret == 0) ? ESP_OK : ESP_FAIL;
+}
+
+/**
+ * @brief Prepare codec for direct PCM playback (not via ESP Audio Simple Player)
+ *
+ * This ensures the codec is in the correct state for direct writes.
+ * Call before using esp_audio_play() directly.
+ *
+ * Note: We do NOT close/reopen the codec as that disrupts the shared I2S bus
+ * configuration between TX and RX channels, causing "Mode conflict" errors.
+ */
+esp_err_t esp_audio_prepare_for_pcm(void)
+{
+    if (!play_dev) {
+        ESP_LOGE(TAG, "esp_audio_prepare_for_pcm: play_dev is NULL!");
+        return ESP_FAIL;
+    }
+
+    /* Set volume to maximum */
+    int ret = esp_codec_dev_set_out_vol(play_dev, PLAYER_VOLUME);
+    ESP_LOGI(TAG, "Codec volume set to %d, ret=%d", PLAYER_VOLUME, ret);
+
+    /* Unmute the DAC output */
+    ret = esp_codec_dev_set_out_mute(play_dev, false);
+    ESP_LOGI(TAG, "Codec unmuted: ret=%d", ret);
+
+    return ESP_OK;
+}
+
+/* Track first call for logging */
+static bool s_first_audio_play = true;
+
 esp_err_t esp_audio_play(const int16_t* data, int length, uint32_t ticks_to_wait)
 {
     size_t bytes_write = 0;
     esp_err_t ret = ESP_OK;
     if (!play_dev) {
+        ESP_LOGE(TAG, "esp_audio_play: play_dev is NULL!");
         return ESP_FAIL;
     }
 
@@ -254,16 +299,40 @@ esp_err_t esp_audio_play(const int16_t* data, int length, uint32_t ticks_to_wait
         for (int i = 0; i < length / sizeof(int16_t); i++) {
             data_out[i] = ((int)data[i]) << 16;
         }
+        /* Log first converted sample for debugging */
+        if (s_first_audio_play && length >= 8) {
+            ESP_LOGI(TAG, "32-bit conv: in[0-3]=%d,%d,%d,%d -> out[0-3]=0x%08X,0x%08X,0x%08X,0x%08X",
+                     data[0], data[1], data[2], data[3],
+                     data_out[0], data_out[1], data_out[2], data_out[3]);
+            ESP_LOGI(TAG, "in_len=%d bytes (%d samples), out_len=%d bytes",
+                     length, length / 2, out_length);
+        }
     }
 
     if (data_out != NULL) {
         ret = esp_codec_dev_write(play_dev, (void *)data_out, out_length);
+        if (s_first_audio_play) {
+            ESP_LOGI(TAG, "esp_codec_dev_write: out_len=%d, ret=%d", out_length, ret);
+            s_first_audio_play = false;
+        }
         free(data_out);
     } else {
         ret = esp_codec_dev_write(play_dev, (void *)data, length);
+        if (s_first_audio_play) {
+            ESP_LOGI(TAG, "esp_codec_dev_write (16-bit): len=%d, ret=%d", length, ret);
+            s_first_audio_play = false;
+        }
     }
 
     return ret;
+}
+
+/**
+ * @brief Reset first-call logging flag for esp_audio_play
+ */
+void esp_audio_reset_log_flag(void)
+{
+    s_first_audio_play = true;
 }
 
 esp_err_t esp_get_feed_data(bool is_get_raw_channel, int16_t *buffer, int buffer_len)

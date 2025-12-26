@@ -597,8 +597,21 @@ esp_gmf_err_t Audio_Play_PCM(const int16_t *pcm_data, size_t samples,
     ESP_LOGI(TAG, "Playing embedded PCM: %zu samples @ %lu Hz, %d ch",
              samples, (unsigned long)sample_rate, channels);
 
-    /* Enable power amplifier */
+    /* Reset logging flag to get detailed debug output */
+    esp_audio_reset_log_flag();
+
+    /* Prepare codec for direct PCM playback (re-open, set volume, unmute) */
+    esp_err_t prep_ret = esp_audio_prepare_for_pcm();
+    if (prep_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to prepare codec for PCM: %s", esp_err_to_name(prep_ret));
+        return ESP_GMF_ERR_FAIL;
+    }
+
+    /* Enable power amplifier and wait for it to stabilize */
     Audio_PA_EN();
+    ESP_LOGI(TAG, "PA enabled (GPIO0=1)");
+
+    vTaskDelay(pdMS_TO_TICKS(20));  /* 20ms for amp and codec startup */
 
     /* Calculate resampling ratio */
     float ratio = (float)TARGET_SAMPLE_RATE / (float)sample_rate;
@@ -653,14 +666,32 @@ esp_gmf_err_t Audio_Play_PCM(const int16_t *pcm_data, size_t samples,
         }
 
         /* Send to codec */
-        esp_audio_play(out_buf, chunk_size * 2 * sizeof(int16_t), 100 / portTICK_PERIOD_MS);
+        esp_err_t play_ret = esp_audio_play(out_buf, chunk_size * 2 * sizeof(int16_t), 100 / portTICK_PERIOD_MS);
+        if (out_idx == 0) {
+            /* Log first chunk details */
+            ESP_LOGI(TAG, "First chunk: samples[0-3]=%d,%d,%d,%d ret=%d",
+                     out_buf[0], out_buf[1], out_buf[2], out_buf[3], play_ret);
+        }
         out_idx += chunk_size;
     }
 
+    /* Send silence to flush the DMA buffer and ensure all audio reaches the speaker */
+    memset(out_buf, 0, PCM_CHUNK_SAMPLES * 2 * sizeof(int16_t));
+    esp_audio_play(out_buf, PCM_CHUNK_SAMPLES * 2 * sizeof(int16_t), 100 / portTICK_PERIOD_MS);
+    esp_audio_play(out_buf, PCM_CHUNK_SAMPLES * 2 * sizeof(int16_t), 100 / portTICK_PERIOD_MS);
+    ESP_LOGI(TAG, "Sent silence to flush DMA buffer");
+
     free(out_buf);
+
+    /* Wait for I2S DMA buffer to finish outputting before disabling PA.
+     * At 44.1kHz stereo 32-bit, the I2S buffer can hold a few ms of audio.
+     * Add 100ms delay to ensure last samples reach the speaker. */
+    ESP_LOGI(TAG, "Waiting for I2S DMA to finish...");
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     /* Disable power amplifier after playback */
     Audio_PA_DIS();
+    ESP_LOGI(TAG, "PA disabled (GPIO0=0)");
 
     ESP_LOGI(TAG, "Embedded PCM playback complete");
     return ESP_GMF_ERR_OK;
