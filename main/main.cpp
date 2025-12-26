@@ -33,6 +33,7 @@
 #include "lvgl_app_music.hpp"       /* Music player with file browser */
 #include "lvgl_app_rec.hpp"         /* Audio recorder to WAV */
 #include "lvgl_app_mibuddy.hpp"     /* MiBuddy virtual buddy (image slideshow) */
+#include "lvgl_app_car_gallery.hpp" /* Car Animation Gallery */
 #include "audio_driver.h"           /* Audio playback control */
 #include "wifi_manager.h"           /* WiFi auto-connect and status */
 #include "time_sync.h"              /* NTP time sync to RTC */
@@ -430,6 +431,15 @@ extern "C" void app_main(void)
     ESP_BROOKESIA_CHECK_NULL_EXIT(app_mibuddy_conf, "Create app mibuddy failed");
     int mibuddy_app_id = phone->installApp(app_mibuddy_conf);
     ESP_BROOKESIA_CHECK_FALSE_EXIT((mibuddy_app_id >= 0), "Install app mibuddy failed");
+
+    /* Install Car Animation Gallery App
+     * - Browse 32 car-themed animations
+     * - Touch navigation to cycle through states
+     * - Demonstrates display capabilities
+     */
+    PhoneCarGalleryConf *app_car_gallery_conf = new PhoneCarGalleryConf(1, 0);
+    ESP_BROOKESIA_CHECK_NULL_EXIT(app_car_gallery_conf, "Create app car gallery failed");
+    ESP_BROOKESIA_CHECK_FALSE_EXIT((phone->installApp(app_car_gallery_conf) >= 0), "Install app car gallery failed");
 
     /* Auto-launch MiBuddy as startup app */
     ESP_Brookesia_CoreAppEventData_t startup_event = {

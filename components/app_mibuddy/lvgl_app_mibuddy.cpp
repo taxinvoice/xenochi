@@ -26,6 +26,7 @@
 #include "mochi_input.h"
 #include "mochi_assets.h"
 #include "audio_driver.h"
+#include "power_manager.h"
 
 /* External sounds */
 extern "C" {
@@ -483,6 +484,36 @@ static void input_timer_cb(lv_timer_t *t)
 }
 
 /*===========================================================================
+ * Power State Callback - Pause/resume on sleep transitions
+ *===========================================================================*/
+
+/**
+ * @brief Callback for power state changes
+ *
+ * Pauses the mochi state machine when entering light sleep and resumes
+ * it when returning to active. This saves resources during sleep.
+ */
+static void power_state_callback(power_state_t old_state, power_state_t new_state)
+{
+    if (new_state == POWER_STATE_LIGHT_SLEEP) {
+        /* Entering light sleep - pause state machine */
+        ESP_LOGI("MiBuddy", "Entering sleep - pausing state machine");
+        if (s_input_timer) {
+            lv_timer_delete(s_input_timer);
+            s_input_timer = NULL;
+        }
+        mochi_pause();
+    } else if (old_state == POWER_STATE_LIGHT_SLEEP && new_state == POWER_STATE_ACTIVE) {
+        /* Waking from light sleep - resume state machine */
+        ESP_LOGI("MiBuddy", "Waking from sleep - resuming state machine");
+        mochi_resume();
+        if (s_input_timer == NULL) {
+            s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
+        }
+    }
+}
+
+/*===========================================================================
  * Constructors/Destructor
  *===========================================================================*/
 
@@ -527,6 +558,11 @@ PhoneMiBuddyConf::~PhoneMiBuddyConf()
 bool PhoneMiBuddyConf::run(void)
 {
     ESP_BROOKESIA_LOGD("Run");
+
+    /* Force clean mochi state - ensures we create fresh on THIS screen
+     * This handles the case where Car Gallery left mochi initialized
+     * on a different screen, or previous MiBuddy session wasn't fully cleaned */
+    mochi_deinit();
 
     /* Initialize audio system (required for embedded PCM playback) */
     Audio_Play_Init();
@@ -573,6 +609,9 @@ bool PhoneMiBuddyConf::run(void)
     /* Start timer for input updates */
     s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
 
+    /* Register for power state changes to pause/resume on sleep */
+    power_manager_register_callback(power_state_callback);
+
     ESP_LOGI("MiBuddy", "Input mapper started: interval=%lums (%.1f Hz), API fallback when idle",
              (unsigned long)s_input_timer_interval_ms, 1000.0f / s_input_timer_interval_ms);
 
@@ -589,6 +628,9 @@ bool PhoneMiBuddyConf::run(void)
 bool PhoneMiBuddyConf::back(void)
 {
     ESP_BROOKESIA_LOGD("Back");
+
+    /* Unregister power state callback */
+    power_manager_register_callback(NULL);
 
     /* Stop input timer */
     if (s_input_timer) {
@@ -632,6 +674,9 @@ bool PhoneMiBuddyConf::close(void)
 {
     ESP_BROOKESIA_LOGD("Close");
 
+    /* Unregister power state callback */
+    power_manager_register_callback(NULL);
+
     /* Stop input timer */
     if (s_input_timer) {
         lv_timer_delete(s_input_timer);
@@ -666,22 +711,49 @@ bool PhoneMiBuddyConf::close(void)
 /**
  * @brief Called when the app is paused (e.g., switching to another app)
  *
- * Pauses mochi animations while app is in background.
+ * Full cleanup to release memory when switching containers.
  *
  * @return true on success
  */
 bool PhoneMiBuddyConf::pause(void)
 {
-    ESP_BROOKESIA_LOGD("Pause");
+    ESP_BROOKESIA_LOGD("Pause - full cleanup to release memory");
 
-    /* Stop input timer to disable state machine while paused */
+    /* Unregister power state callback */
+    power_manager_register_callback(NULL);
+
+    /* Stop input timer */
     if (s_input_timer) {
         lv_timer_delete(s_input_timer);
         s_input_timer = NULL;
     }
 
-    /* Pause mochi when app is paused */
-    mochi_pause();
+    /* Cleanup input system */
+    mochi_input_deinit();
+
+    /* Delete UI elements we created (not owned by screen) */
+    if (s_state_label) {
+        lv_obj_del(s_state_label);
+        s_state_label = NULL;
+    }
+    if (s_debug_overlay) {
+        lv_obj_del(s_debug_overlay);
+        s_debug_overlay = NULL;
+    }
+
+    /* Reset UI pointers */
+    s_debug_orient_label = NULL;
+    s_debug_motion_label = NULL;
+    s_debug_angles_label = NULL;
+    s_debug_calc_label = NULL;
+
+    /* Reset state hold variables */
+    s_held_state = MOCHI_STATE_HAPPY;
+    s_held_activity = MOCHI_ACTIVITY_IDLE;
+    s_state_change_time = 0;
+
+    /* Full cleanup of mochi resources */
+    mochi_deinit();
 
     return true;
 }
@@ -689,21 +761,58 @@ bool PhoneMiBuddyConf::pause(void)
 /**
  * @brief Called when the app is resumed from pause
  *
- * Resumes mochi animations.
+ * Full reinitialization since we did full cleanup on pause.
  *
  * @return true on success
  */
 bool PhoneMiBuddyConf::resume(void)
 {
-    ESP_BROOKESIA_LOGD("Resume");
+    ESP_BROOKESIA_LOGD("Resume - reinitializing");
 
-    /* Resume mochi when app is resumed */
-    mochi_resume();
+    /* Clean up any state from other apps first */
+    mochi_deinit();
 
-    /* Restart input timer for state machine */
-    if (s_input_timer == NULL) {
-        s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
-    }
+    /* Create debug overlay */
+    create_debug_overlay(lv_screen_active());
+
+    /* Initialize and create mochi avatar */
+    mochi_init();
+    mochi_create(lv_screen_active());
+
+    /* Bring debug overlay to front AFTER face is created */
+    lv_obj_move_foreground(s_debug_overlay);
+
+    /* Create state label overlay at top of screen */
+    s_state_label = lv_label_create(lv_screen_active());
+    lv_obj_set_style_text_color(s_state_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_state_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_bg_color(s_state_label, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_state_label, LV_OPA_70, 0);
+    lv_obj_set_style_pad_all(s_state_label, 8, 0);
+    lv_obj_set_style_radius(s_state_label, 6, 0);
+    lv_obj_align(s_state_label, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_move_foreground(s_state_label);
+    update_state_label();
+
+    /* Start with first state (Happy + Idle) */
+    mochi_set(MOCHI_STATE_HAPPY, MOCHI_ACTIVITY_IDLE);
+
+    /* Initialize input system with hold-wrapped mapper */
+    mochi_input_init();
+    mochi_input_set_mapper_fn(hold_wrapper_mapper);
+
+    /* Set API URL for remote decisions */
+#ifdef CONFIG_MIBUDDY_API_URL
+    mochi_input_set_api_url(CONFIG_MIBUDDY_API_URL);
+#else
+    mochi_input_set_api_url("http://10.0.13.101:8080/mochi/state");
+#endif
+
+    /* Start timer for input updates */
+    s_input_timer = lv_timer_create(input_timer_cb, s_input_timer_interval_ms, NULL);
+
+    /* Register for power state changes */
+    power_manager_register_callback(power_state_callback);
 
     return true;
 }

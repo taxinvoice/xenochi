@@ -35,6 +35,23 @@ typedef struct {
 } power_manager_config_t;
 
 /**
+ * @brief Power state change callback type
+ * @param old_state Previous power state
+ * @param new_state New power state
+ */
+typedef void (*power_state_cb_t)(power_state_t old_state, power_state_t new_state);
+
+/**
+ * @brief Register a callback for power state changes
+ *
+ * The callback is invoked on every state transition (ACTIVE, SCREEN_OFF, LIGHT_SLEEP).
+ * Only one callback can be registered at a time.
+ *
+ * @param cb Callback function, or NULL to unregister
+ */
+void power_manager_register_callback(power_state_cb_t cb);
+
+/**
  * @brief Initialize power manager
  *
  * Starts the power manager task that monitors face-down state

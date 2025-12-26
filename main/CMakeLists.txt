@@ -27,6 +27,7 @@ idf_component_register(
         app_gyroscope
         app_rec_test
         app_mibuddy
+        app_car_gallery
         audio_play
         net_api
         net_mqtt

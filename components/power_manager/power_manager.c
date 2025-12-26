@@ -62,6 +62,9 @@ static struct {
     .running = false,
 };
 
+/* State change callback */
+static power_state_cb_t s_state_callback = NULL;
+
 /* Forward declarations */
 static void power_manager_task(void *arg);
 static void load_config_from_nvs(void);
@@ -129,6 +132,8 @@ static void transition_to_screen_off(void)
 
     ESP_LOGI(TAG, "Transitioning to SCREEN_OFF");
 
+    power_state_t old_state = s_pm.state;
+
     /* Save current backlight level */
     s_pm.saved_backlight = bsp_read_backlight_value();
     if (s_pm.saved_backlight == 0) {
@@ -140,6 +145,10 @@ static void transition_to_screen_off(void)
 
     s_pm.state = POWER_STATE_SCREEN_OFF;
     s_pm.screen_off_start_us = esp_timer_get_time();
+
+    if (s_state_callback) {
+        s_state_callback(old_state, POWER_STATE_SCREEN_OFF);
+    }
 }
 
 static void transition_to_light_sleep(void)
@@ -151,7 +160,13 @@ static void transition_to_light_sleep(void)
     }
 
     ESP_LOGI(TAG, "Transitioning to LIGHT_SLEEP");
+
+    power_state_t old_state = s_pm.state;
     s_pm.state = POWER_STATE_LIGHT_SLEEP;
+
+    if (s_state_callback) {
+        s_state_callback(old_state, POWER_STATE_LIGHT_SLEEP);
+    }
 
     /* Configure wake sources */
     configure_wake_sources();
@@ -192,6 +207,8 @@ static void transition_to_active(void)
 
     ESP_LOGI(TAG, "Transitioning to ACTIVE");
 
+    power_state_t old_state = s_pm.state;
+
     /* Disable wake sources */
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
@@ -202,6 +219,10 @@ static void transition_to_active(void)
     s_pm.face_down_start_us = 0;
     s_pm.screen_off_start_us = 0;
     s_pm.last_activity_us = esp_timer_get_time();
+
+    if (s_state_callback) {
+        s_state_callback(old_state, POWER_STATE_ACTIVE);
+    }
 }
 
 static void configure_wake_sources(void)
@@ -445,4 +466,10 @@ esp_err_t power_manager_set_idle_timeout(uint32_t seconds)
 uint32_t power_manager_get_idle_timeout(void)
 {
     return s_pm.config.idle_screen_off_timeout_sec;
+}
+
+void power_manager_register_callback(power_state_cb_t cb)
+{
+    s_state_callback = cb;
+    ESP_LOGI(TAG, "State callback %s", cb ? "registered" : "unregistered");
 }
