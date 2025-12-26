@@ -1,1 +1,5 @@
 build/
+
+# Claude Code (local AI assistant configuration)
+.claude/
+CLAUDE.md
